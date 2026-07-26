@@ -945,12 +945,17 @@
       <div class="nav-item" onclick="filterRegion(&#39;Africa&#39;)"><span class="nav-icon">🌍</span>Africa</div>
       <div class="nav-item" onclick="filterRegion(&#39;MiddleEast&#39;)"><span class="nav-icon">🌏</span>Middle East</div>
     </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Supply Chain</div>
+      <div class="nav-item" onclick="openSupplyChain()"><span class="nav-icon">🔗</span>Explore Supply Chains</div>
+    </div>
     <div class="map-layers">
       <div class="layer-title">Map Layers</div>
       <div class="layer-item"><div class="layer-dot" style="background:var(--accent)"></div>Countries<div class="layer-toggle on" id="toggle-countries" onclick="toggleLayer(this,&#39;countries&#39;)"></div></div>
       <div class="layer-item"><div class="layer-dot" style="background:var(--green)"></div>Trade Routes<div class="layer-toggle" id="toggle-trade" onclick="toggleLayer(this,&#39;trade&#39;)"></div></div>
       <div class="layer-item"><div class="layer-dot" style="background:var(--yellow)"></div>Data Centers<div class="layer-toggle" id="toggle-data" onclick="toggleLayer(this,&#39;data&#39;)"></div></div>
       <div class="layer-item"><div class="layer-dot" style="background:var(--red)"></div>Risk Zones<div class="layer-toggle" id="toggle-risk" onclick="toggleLayer(this,&#39;risk&#39;)"></div></div>
+      <div class="layer-item"><div class="layer-dot" style="background:#f97316"></div>Logistics<div class="layer-toggle" id="toggle-logistics" onclick="toggleLayer(this,&#39;logistics&#39;)"></div></div>
     </div>
   </div>
 
@@ -4554,6 +4559,7 @@ async function loadMap() {
   try {
     const world = await d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json");
     const countries = topojson.feature(world, world.objects.countries);
+    window._countryFeatures = countries.features; // exposed for supply-chain map markers
 
     g.selectAll(".country")
       .data(countries.features)
@@ -9540,8 +9546,418 @@ toggleLayer = function(el, layer) {
   } else if (layer === 'risk') {
     svg.selectAll('.layer-risk').remove();
     if (isOn) renderRiskZones(g);
+  } else if (layer === 'logistics') {
+    svg.selectAll('.layer-logistics').remove();
+    document.getElementById('logistics-panel')?.remove();
+    if (isOn) {
+      const svgEl = svg.node();
+      const w = svgEl.clientWidth||800, h = svgEl.clientHeight||500;
+      const proj = d3.geoNaturalEarth1().scale(w/6.5).translate([w/2,h/2]);
+      renderLogisticsLayer(g, proj);
+      renderLogisticsPanel();
+    }
   }
 };
+
+// ════════════════════════════════════════════════════════════
+// SUPPLY CHAIN / LOGISTICS
+// Curated reference data: producer shares are approximate, based on
+// publicly published USGS Mineral Commodity Summaries / national
+// production statistics. Companies and ports are real, well-known
+// participants in each trade. Chokepoints are real, named maritime
+// straits/canals. Vessel-level "en route" entries have NO public,
+// free, real-time source (AIS+cargo-manifest data requires a paid
+// provider such as MarineTraffic or Spire) — they are explicitly
+// labelled illustrative/representative, never presented as tracked.
+// ════════════════════════════════════════════════════════════
+const CHOKEPOINTS = [
+  { id:'malacca',  name:'Strait of Malacca',   lng:100.5, lat:2.8,  note:'~25% of world seaborne trade transits here' },
+  { id:'hormuz',   name:'Strait of Hormuz',    lng:56.3,  lat:26.6, note:'Key Gulf oil/LNG chokepoint' },
+  { id:'suez',     name:'Suez Canal',          lng:32.3,  lat:30.6, note:'Europe ⇄ Asia shortcut; ~12% of world trade' },
+  { id:'panama',   name:'Panama Canal',        lng:-79.6, lat:9.1,  note:'Pacific ⇄ Atlantic shortcut' },
+  { id:'gibraltar',name:'Strait of Gibraltar', lng:-5.6,  lat:35.9, note:'Mediterranean ⇄ Atlantic gateway' },
+  { id:'bab',      name:'Bab-el-Mandeb',       lng:43.4,  lat:12.6, note:'Red Sea ⇄ Gulf of Aden gateway' },
+  { id:'cogh',     name:'Cape of Good Hope',   lng:18.4,  lat:-34.4,note:'Suez-bypass route around southern Africa' },
+  { id:'sunda',    name:'Sunda Strait',        lng:105.9, lat:-6.0, note:'Alternate Indonesia ⇄ Indian Ocean route' },
+];
+
+const MINERALS = [
+  { id:'bauxite',  name:'Bauxite',  icon:'🪨', category:'Metals', use:'Aluminum smelting',
+    producers:[{id:36,share:30},{id:324,share:22},{id:156,share:14},{id:76,share:9},{id:356,share:5},{id:388,share:2}],
+    chokepoints:['cogh','malacca','sunda'] },
+  { id:'lithium',  name:'Lithium',  icon:'🔋', category:'Battery metals', use:'EV & grid batteries',
+    producers:[{id:36,share:47},{id:152,share:24},{id:156,share:18},{id:32,share:6},{id:76,share:2},{id:716,share:1}],
+    chokepoints:['malacca','sunda'] },
+  { id:'cobalt',   name:'Cobalt',   icon:'🔷', category:'Battery metals', use:'Battery cathodes',
+    producers:[{id:180,share:74},{id:360,share:5},{id:643,share:4},{id:36,share:3},{id:608,share:2},{id:124,share:2}],
+    chokepoints:['cogh','suez','bab'] },
+  { id:'ree',      name:'Rare Earth Elements', icon:'🧲', category:'Critical minerals', use:'Magnets, electronics',
+    producers:[{id:156,share:68},{id:840,share:12},{id:104,share:10},{id:36,share:6}],
+    chokepoints:['malacca','suez'] },
+  { id:'copper',   name:'Copper',   icon:'🔌', category:'Metals', use:'Wiring, electronics',
+    producers:[{id:152,share:24},{id:604,share:11},{id:180,share:10},{id:156,share:9},{id:840,share:5},{id:643,share:4}],
+    chokepoints:['panama','cogh'] },
+  { id:'nickel',   name:'Nickel',   icon:'⚙️', category:'Battery metals', use:'Stainless steel, batteries',
+    producers:[{id:360,share:50},{id:608,share:9},{id:643,share:6},{id:124,share:5},{id:36,share:4}],
+    chokepoints:['malacca','sunda'] },
+  { id:'graphite', name:'Graphite', icon:'⬛', category:'Battery metals', use:'Battery anodes, steel',
+    producers:[{id:156,share:65},{id:508,share:9},{id:76,share:8},{id:356,share:3}],
+    chokepoints:['malacca','cogh'] },
+  { id:'uranium',  name:'Uranium',  icon:'☢️', category:'Energy minerals', use:'Nuclear fuel',
+    producers:[{id:398,share:43},{id:124,share:15},{id:516,share:11},{id:36,share:9},{id:643,share:5}],
+    chokepoints:['suez','cogh'] },
+  { id:'iron',     name:'Iron Ore', icon:'⛏️', category:'Metals', use:'Steelmaking',
+    producers:[{id:36,share:38},{id:76,share:17},{id:156,share:14},{id:356,share:8},{id:643,share:4}],
+    chokepoints:['cogh','malacca'] },
+  { id:'pgm',      name:'Platinum Group Metals', icon:'💍', category:'Metals', use:'Catalytic converters, electronics',
+    producers:[{id:710,share:71},{id:643,share:11},{id:716,share:8},{id:124,share:3}],
+    chokepoints:['cogh','suez'] },
+  { id:'tin',      name:'Tin',      icon:'🥫', category:'Metals', use:'Solder, electronics',
+    producers:[{id:156,share:28},{id:360,share:19},{id:104,share:12},{id:604,share:9},{id:68,share:6}],
+    chokepoints:['malacca','sunda'] },
+  { id:'zinc',     name:'Zinc',     icon:'🔧', category:'Metals', use:'Galvanizing',
+    producers:[{id:156,share:33},{id:604,share:10},{id:36,share:9},{id:356,share:6},{id:484,share:5}],
+    chokepoints:['panama','malacca'] },
+  { id:'phosphate',name:'Phosphate',icon:'🌾', category:'Agriculture', use:'Fertilizer',
+    producers:[{id:156,share:41},{id:504,share:13},{id:840,share:10},{id:643,share:5},{id:76,share:3}],
+    chokepoints:['gibraltar','suez'] },
+  { id:'potash',   name:'Potash',   icon:'🧂', category:'Agriculture', use:'Fertilizer',
+    producers:[{id:124,share:30},{id:643,share:19},{id:112,share:17},{id:156,share:10}],
+    chokepoints:['panama','gibraltar'] },
+];
+const MINERAL_MAP = {}; MINERALS.forEach(m => MINERAL_MAP[m.id] = m);
+
+// Major companies per mineral (real producers/traders, curated reference list)
+const MINERAL_COMPANIES = {
+  bauxite:[{name:'Rio Tinto',hq:'Australia / UK'},{name:'Alcoa',hq:'United States'},{name:'South32',hq:'Australia'},{name:'CBG (Cie. des Bauxites de Guinée)',hq:'Guinea'},{name:'Chinalco',hq:'China'}],
+  lithium:[{name:'Albemarle',hq:'United States'},{name:'SQM',hq:'Chile'},{name:'Ganfeng Lithium',hq:'China'},{name:'Pilbara Minerals',hq:'Australia'},{name:'Tianqi Lithium',hq:'China'}],
+  cobalt:[{name:'Glencore',hq:'Switzerland'},{name:'CMOC Group',hq:'China / DR Congo'},{name:'Eurasian Resources Group',hq:'DR Congo'}],
+  ree:[{name:'China Northern Rare Earth Group',hq:'China'},{name:'MP Materials',hq:'United States'},{name:'Lynas Rare Earths',hq:'Australia'}],
+  copper:[{name:'Codelco',hq:'Chile'},{name:'BHP',hq:'Australia'},{name:'Freeport-McMoRan',hq:'United States'},{name:'Glencore',hq:'Switzerland'},{name:'Southern Copper Corp.',hq:'Peru'}],
+  nickel:[{name:'Vale',hq:'Brazil'},{name:'Norilsk Nickel',hq:'Russia'},{name:'PT Vale Indonesia',hq:'Indonesia'}],
+  graphite:[{name:'BTR New Energy Materials',hq:'China'},{name:'Syrah Resources',hq:'Mozambique / Australia'}],
+  uranium:[{name:'Kazatomprom',hq:'Kazakhstan'},{name:'Cameco',hq:'Canada'},{name:'Orano',hq:'France'}],
+  iron:[{name:'Vale',hq:'Brazil'},{name:'Rio Tinto',hq:'Australia'},{name:'BHP',hq:'Australia'},{name:'Fortescue',hq:'Australia'}],
+  pgm:[{name:'Anglo American Platinum',hq:'South Africa'},{name:'Sibanye-Stillwater',hq:'South Africa'},{name:'Norilsk Nickel',hq:'Russia'}],
+  tin:[{name:'Yunnan Tin Company',hq:'China'},{name:'PT Timah',hq:'Indonesia'},{name:'Minsur',hq:'Peru'}],
+  zinc:[{name:'China Nonferrous Metal',hq:'China'},{name:'Nexa Resources',hq:'Peru'},{name:'Hindustan Zinc',hq:'India'}],
+  phosphate:[{name:'OCP Group',hq:'Morocco'},{name:'The Mosaic Company',hq:'United States'},{name:'Yuntianhua Group',hq:'China'}],
+  potash:[{name:'Nutrien',hq:'Canada'},{name:'Uralkali',hq:'Russia'},{name:'Belaruskali',hq:'Belarus'}],
+};
+
+// Major real export ports, keyed by mineral then by producer country numeric id
+const MINERAL_PORTS = {
+  bauxite:{36:[{name:'Gove',lng:136.7,lat:-12.3}],324:[{name:'Kamsar',lng:-14.6,lat:10.7},{name:'Boké',lng:-14.3,lat:10.9}],76:[{name:'Trombetas / Porto Trombetas',lng:-56.4,lat:-1.5}]},
+  lithium:{36:[{name:'Fremantle',lng:115.7,lat:-32.1}],152:[{name:'Antofagasta',lng:-70.4,lat:-23.6}],32:[{name:'Buenos Aires',lng:-58.4,lat:-34.6}]},
+  cobalt:{180:[{name:'Durban (via corridor)',lng:31.0,lat:-29.9}],360:[{name:'Kolonodale',lng:121.9,lat:-2.0}]},
+  ree:{156:[{name:'Lianyungang',lng:119.2,lat:34.6}],840:[{name:'Long Beach',lng:-118.2,lat:33.8}],104:[{name:'Yangon',lng:96.2,lat:16.8}]},
+  copper:{152:[{name:'Antofagasta',lng:-70.4,lat:-23.6},{name:'Valparaíso',lng:-71.6,lat:-33.0}],604:[{name:'Callao',lng:-77.1,lat:-12.1}],180:[{name:'Durban (via corridor)',lng:31.0,lat:-29.9}]},
+  nickel:{360:[{name:'Morowali',lng:121.6,lat:-1.9}],608:[{name:'Surigao',lng:125.5,lat:9.8}],124:[{name:'Sudbury → Thunder Bay',lng:-89.2,lat:48.4}]},
+  graphite:{156:[{name:'Qingdao',lng:120.3,lat:36.1}],508:[{name:'Nacala',lng:40.7,lat:-14.5}]},
+  uranium:{398:[{name:'Aktau',lng:51.2,lat:43.7}],124:[{name:'Saskatoon → Vancouver',lng:-123.1,lat:49.3}],516:[{name:'Walvis Bay',lng:14.5,lat:-22.9}]},
+  iron:{36:[{name:'Port Hedland',lng:118.6,lat:-20.3},{name:'Dampier',lng:116.7,lat:-20.7}],76:[{name:'Ponta da Madeira',lng:-44.4,lat:-2.6}],356:[{name:'Paradip',lng:86.7,lat:20.3}]},
+  pgm:{710:[{name:'Durban',lng:31.0,lat:-29.9},{name:'Richards Bay',lng:32.1,lat:-28.8}],643:[{name:'Murmansk',lng:33.1,lat:69.0}]},
+  tin:{360:[{name:'Pangkal Pinang / Muntok',lng:106.1,lat:-2.1}],604:[{name:'Callao',lng:-77.1,lat:-12.1}]},
+  zinc:{604:[{name:'Callao',lng:-77.1,lat:-12.1}],36:[{name:'Port Pirie',lng:138.0,lat:-33.2}],356:[{name:'Kandla',lng:70.2,lat:23.0}]},
+  phosphate:{504:[{name:'Jorf Lasfar',lng:-8.6,lat:33.1}],840:[{name:'Tampa',lng:-82.5,lat:27.9}]},
+  potash:{124:[{name:'Vancouver',lng:-123.1,lat:49.3}],643:[{name:'Ust-Luga',lng:28.3,lat:59.7}],112:[{name:'Klaipėda (via)',lng:21.1,lat:55.7}]},
+};
+
+// Representative destination hub per mineral, for the "plot on map" view
+const MINERAL_HUB = {
+  bauxite:{name:'Qingdao, China',lng:120.3,lat:36.1}, lithium:{name:'Shanghai, China',lng:121.5,lat:31.2},
+  cobalt:{name:'Shanghai, China',lng:121.5,lat:31.2}, ree:{name:'Yokohama, Japan',lng:139.6,lat:35.4},
+  copper:{name:'Qingdao, China',lng:120.3,lat:36.1}, nickel:{name:'Qingdao, China',lng:120.3,lat:36.1},
+  graphite:{name:'Busan, South Korea',lng:129.0,lat:35.1}, uranium:{name:'Rotterdam, Netherlands',lng:4.5,lat:51.9},
+  iron:{name:'Qingdao, China',lng:120.3,lat:36.1}, pgm:{name:'Rotterdam, Netherlands',lng:4.5,lat:51.9},
+  tin:{name:'Rotterdam, Netherlands',lng:4.5,lat:51.9}, zinc:{name:'Antwerp, Belgium',lng:4.4,lat:51.2},
+  phosphate:{name:'New Orleans, USA',lng:-90.1,lat:29.0}, potash:{name:'Rotterdam, Netherlands',lng:4.5,lat:51.9},
+};
+
+const VESSEL_CLASSES = ['Capesize Bulk Carrier','Panamax Bulk Carrier','Handymax Bulk Carrier','VLOC (Very Large Ore Carrier)','Container Ship'];
+
+// No free, real-time, cargo-specific vessel-tracking source exists (AIS + manifest
+// data requires a paid provider). Generates clearly-labelled illustrative entries
+// only — deterministic per mineral+port so the list is stable across renders.
+function illustrativeShips(mineralId, portName) {
+  let seed = 0; for (const ch of (mineralId+portName)) seed = (seed*31 + ch.charCodeAt(0)) >>> 0;
+  const rnd = () => { seed = (seed*1103515245 + 12345) >>> 0; return seed / 4294967296; };
+  const n = 2 + Math.floor(rnd()*3);
+  const out = [];
+  for (let i=0;i<n;i++) {
+    const cls = VESSEL_CLASSES[Math.floor(rnd()*VESSEL_CLASSES.length)];
+    const daysAgo = 1 + Math.floor(rnd()*12);
+    const eta = 3 + Math.floor(rnd()*18);
+    out.push({ cls, label:`${cls} (illustrative #${i+1})`, daysAgo, eta });
+  }
+  return out;
+}
+
+let _scMineral = null, _scCountry = null, _scPort = null;
+
+function openSupplyChain() {
+  document.getElementById('supplychain-overlay').classList.add('visible');
+  if (!_scMineral) selectSCMineral(MINERALS[0].id);
+}
+function closeSupplyChain() { document.getElementById('supplychain-overlay').classList.remove('visible'); }
+
+function renderSCChips() {
+  return MINERALS.map(m => `
+    <div onclick="selectSCMineral('${m.id}')" style="flex-shrink:0;cursor:pointer;padding:6px 12px;border-radius:20px;
+      border:1px solid ${_scMineral===m.id?'var(--accent)':'var(--border)'};
+      background:${_scMineral===m.id?'rgba(59,130,246,0.18)':'var(--surface2)'};
+      color:${_scMineral===m.id?'var(--accent)':'var(--text2)'};font-size:12px;white-space:nowrap">
+      ${m.icon} ${m.name}
+    </div>`).join('');
+}
+
+function selectSCMineral(id) {
+  _scMineral = id; _scCountry = null; _scPort = null;
+  document.getElementById('sc-chips').innerHTML = renderSCChips();
+  renderSCNetwork();
+  renderSCDetail();
+}
+
+function renderSCNetwork() {
+  const area = document.getElementById('sc-network');
+  if (!area || !_scMineral) return;
+  const m = MINERAL_MAP[_scMineral];
+  area.innerHTML = '';
+  const W = Math.max(area.clientWidth || 700, 500), H = 230;
+  const svg = d3.select(area).append('svg').attr('width', W).attr('height', H);
+
+  const mx = 70, my = H/2;
+  const colX = W - 150;
+  const total = m.producers.reduce((s,p)=>s+p.share, 0);
+  let y = 20;
+  const rows = m.producers.map(p => {
+    const h = Math.max(20, (H-40) * (p.share/total) - 6);
+    const row = { p, y, h };
+    y += h + 6;
+    return row;
+  });
+
+  // Links (mineral → country bands)
+  rows.forEach(r => {
+    const sx = mx+34, sy = my;
+    const tx = colX, ty = r.y + r.h/2;
+    const d = `M${sx},${sy-4} C${(sx+tx)/2},${sy-4} ${(sx+tx)/2},${r.y} ${tx},${r.y}
+               L${tx},${r.y+r.h} C${(sx+tx)/2},${r.y+r.h} ${(sx+tx)/2},${sy+4} ${sx},${sy+4} Z`;
+    svg.append('path').attr('d', d).attr('fill','var(--accent)').attr('fill-opacity',0.18)
+       .attr('stroke','var(--accent)').attr('stroke-width',0.6).attr('stroke-opacity',0.4);
+  });
+
+  // Mineral node
+  const mNode = svg.append('g').style('cursor','default');
+  mNode.append('circle').attr('cx',mx).attr('cy',my).attr('r',32).attr('fill','var(--accent3)').attr('fill-opacity',0.25).attr('stroke','var(--accent3)').attr('stroke-width',1.5);
+  mNode.append('text').attr('x',mx).attr('y',my-4).attr('text-anchor','middle').attr('font-size',18).text(m.icon);
+  mNode.append('text').attr('x',mx).attr('y',my+14).attr('text-anchor','middle').attr('fill','var(--text)').attr('font-size',10).attr('font-weight',700).text(m.name);
+
+  // Country nodes
+  rows.forEach(r => {
+    const c = COUNTRIES.find(x=>x.id===r.p.id);
+    if (!c) return;
+    const g = svg.append('g').style('cursor','pointer')
+      .on('click', () => selectSCCountry(r.p.id))
+      .on('mouseenter', function(){ d3.select(this).select('rect').attr('stroke-width',2); })
+      .on('mouseleave', function(){ d3.select(this).select('rect').attr('stroke-width', _scCountry===r.p.id?2:1); });
+    g.append('rect').attr('x',colX).attr('y',r.y).attr('width',150).attr('height',r.h).attr('rx',6)
+      .attr('fill', _scCountry===r.p.id ? 'rgba(59,130,246,0.25)' : 'var(--surface2)')
+      .attr('stroke', _scCountry===r.p.id ? 'var(--accent)' : 'var(--border)').attr('stroke-width', _scCountry===r.p.id?2:1);
+    g.append('text').attr('x',colX+8).attr('y',r.y+r.h/2+4).attr('font-size',11).attr('fill','var(--text)')
+      .text(`${c.flag} ${c.name} · ${r.p.share}%`);
+  });
+}
+
+function selectSCCountry(countryId) {
+  _scCountry = countryId; _scPort = null;
+  renderSCNetwork();
+  renderSCDetail();
+}
+
+function renderSCDetail() {
+  const box = document.getElementById('sc-detail');
+  if (!_scMineral) { box.innerHTML=''; return; }
+  const m = MINERAL_MAP[_scMineral];
+  if (!_scCountry) {
+    box.innerHTML = `<div style="color:var(--text3);font-size:12px;padding:10px 2px">Click a country on the right to see its major companies and export ports for ${m.name.toLowerCase()}.</div>`;
+    return;
+  }
+  const c = COUNTRIES.find(x=>x.id===_scCountry);
+  const companies = MINERAL_COMPANIES[_scMineral] || [];
+  const ports = (MINERAL_PORTS[_scMineral] && MINERAL_PORTS[_scMineral][_scCountry]) || [];
+  box.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
+        <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:8px">🏭 Major Companies · ${c.flag} ${c.name}</div>
+        ${companies.length ? companies.map(co=>`<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)"><b>${co.name}</b><div style="color:var(--text3);font-size:10px">${co.hq}</div></div>`).join('') : '<div style="color:var(--text3);font-size:11px">No curated entries</div>'}
+      </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
+        <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:8px">⚓ Major Export Ports · ${c.flag} ${c.name}</div>
+        ${ports.length ? ports.map((p,i)=>`<div onclick="selectSCPort(${i})" style="cursor:pointer;font-size:12px;padding:5px 6px;border-radius:6px;margin-bottom:2px;background:${_scPort===i?'rgba(59,130,246,0.18)':'transparent'};border:1px solid ${_scPort===i?'var(--accent)':'transparent'}">⚓ ${p.name} <span style="color:var(--text3);font-size:10px">(click for vessels)</span></div>`).join('') : '<div style="color:var(--text3);font-size:11px">No curated entries</div>'}
+      </div>
+    </div>
+    <div id="sc-ships" style="margin-top:10px"></div>
+  `;
+  renderSCShips();
+}
+
+function selectSCPort(idx) { _scPort = idx; renderSCDetail(); }
+
+function renderSCShips() {
+  const box = document.getElementById('sc-ships');
+  if (!box || _scPort==null) { if(box) box.innerHTML=''; return; }
+  const ports = (MINERAL_PORTS[_scMineral] && MINERAL_PORTS[_scMineral][_scCountry]) || [];
+  const port = ports[_scPort];
+  if (!port) return;
+  const ships = illustrativeShips(_scMineral, port.name);
+  box.innerHTML = `
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
+      <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">🚢 Vessels en route from ${port.name}</div>
+      ${ships.map(s=>`<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+        <span>${s.label}</span><span style="color:var(--text3)">departed ${s.daysAgo}d ago · ETA ${s.eta}d</span></div>`).join('')}
+      <div style="margin-top:6px;font-size:10px;color:var(--yellow)">⚠ Illustrative example — no free/public real-time cargo-tracking API exists (AIS + manifest data requires a paid provider such as MarineTraffic or Spire).</div>
+    </div>`;
+}
+
+// ── Plot the full chain for the selected mineral (and country, if picked) on the main map ──
+let _scMapMode = false;
+function plotSupplyChainOnMap() {
+  if (!_scMineral) return;
+  closeSupplyChain();
+  _scMapMode = true;
+  const svg = d3.select('#world-map');
+  const g = svg.select('g');
+  svg.selectAll('.layer-sc, .layer-sc-popup').remove();
+  document.getElementById('sc-exit-banner')?.remove();
+
+  const m = MINERAL_MAP[_scMineral];
+  const producerId = _scCountry || m.producers[0].id;
+  const producer = m.producers.find(p=>p.id===producerId) || m.producers[0];
+  const c = COUNTRIES.find(x=>x.id===producer.id);
+  const ports = (MINERAL_PORTS[_scMineral] && MINERAL_PORTS[_scMineral][producer.id]) || [];
+  const port = ports[0];
+  const hub = MINERAL_HUB[_scMineral];
+  if (!c || !port || !hub) return;
+
+  const svgEl = svg.node();
+  const w = svgEl.clientWidth||800, h = svgEl.clientHeight||500;
+  const proj = d3.geoNaturalEarth1().scale(w/6.5).translate([w/2,h/2]);
+  const line = d3.geoPath().projection(proj);
+  // producer marker: use country centroid via its map path bounds if available, else port location as proxy
+  let prodPt = null;
+  try {
+    const feat = window._countryFeatures && window._countryFeatures.find(f=>+f.id===c.id);
+    if (feat) prodPt = d3.geoPath().projection(proj).centroid(feat);
+  } catch(e) {}
+  if (!prodPt || isNaN(prodPt[0])) prodPt = [proj([port.lng,port.lat])[0]-18, proj([port.lng,port.lat])[1]-18];
+
+  const portPt = proj([port.lng, port.lat]);
+  const hubPt = proj([hub.lng, hub.lat]);
+
+  // Stage 1→2: producer to port (short link)
+  g.append('path').attr('class','layer-sc').attr('d', `M${prodPt[0]},${prodPt[1]} L${portPt[0]},${portPt[1]}`)
+    .attr('stroke','#3b82f6').attr('stroke-width',2).attr('stroke-dasharray','3,3').attr('fill','none').attr('opacity',0.8);
+
+  // Stage 3: shipping route (port → hub), clickable
+  g.append('path').attr('class','layer-sc')
+    .datum({type:'LineString',coordinates:[[port.lng,port.lat],[hub.lng,hub.lat]]})
+    .attr('d', line).attr('fill','none').attr('stroke','#f59e0b').attr('stroke-width',3).attr('stroke-opacity',0.85)
+    .style('cursor','pointer')
+    .on('click', (evt) => showRouteShipsPopup(evt, _scMineral, port.name, hub.name))
+    .append('title').text('Click to see vessels en route');
+
+  // Numbered stage markers
+  function marker(pt, n, color, label) {
+    const mk = g.append('g').attr('class','layer-sc').attr('transform',`translate(${pt[0]},${pt[1]})`);
+    mk.append('circle').attr('r',11).attr('fill',color).attr('stroke','#fff').attr('stroke-width',1.5);
+    mk.append('text').attr('text-anchor','middle').attr('y',4).attr('fill','#fff').attr('font-size',11).attr('font-weight',700).text(n);
+    mk.append('title').text(label);
+  }
+  marker(prodPt, 1, '#3b82f6', `① ${c.name} — producer (${producer.share}% of global supply)`);
+  marker(portPt, 2, '#10b981', `② ${port.name} — export port`);
+  marker(hubPt, 4, '#8b5cf6', `④ ${hub.name} — destination hub`);
+
+  // Legend / exit banner
+  const banner = document.createElement('div');
+  banner.id = 'sc-exit-banner';
+  banner.style.cssText = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:250;background:rgba(15,23,42,0.92);border:1px solid var(--border);border-radius:10px;padding:8px 14px;font-size:12px;color:var(--text);display:flex;gap:14px;align-items:center;box-shadow:0 4px 16px rgba(0,0,0,0.4)';
+  banner.innerHTML = `<b>${m.icon} ${m.name} supply chain</b>
+    <span style="color:#3b82f6">① Producer</span><span style="color:#10b981">② Port</span><span style="color:#f59e0b">③ Route (click)</span><span style="color:#8b5cf6">④ Destination</span>
+    <button onclick="exitSCMapMode()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px">✕ Exit</button>`;
+  document.body.appendChild(banner);
+}
+
+function exitSCMapMode() {
+  _scMapMode = false;
+  d3.select('#world-map').selectAll('.layer-sc, .layer-sc-popup').remove();
+  document.getElementById('sc-exit-banner')?.remove();
+}
+
+function showRouteShipsPopup(evt, mineralId, fromLabel, toLabel) {
+  d3.select('#world-map').selectAll('.layer-sc-popup').remove();
+  const ships = illustrativeShips(mineralId, fromLabel+toLabel);
+  const pop = document.createElement('div');
+  pop.className = 'layer-sc-popup-html';
+  pop.style.cssText = `position:fixed;z-index:260;left:${(evt.pageX||evt.clientX||300)+12}px;top:${(evt.pageY||evt.clientY||300)+12}px;
+    background:var(--surface);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--text);
+    box-shadow:0 6px 20px rgba(0,0,0,0.5);max-width:260px`;
+  pop.innerHTML = `<div style="font-weight:700;margin-bottom:6px">🚢 En route: ${fromLabel} → ${toLabel}</div>` +
+    ships.map(s=>`<div style="padding:3px 0;border-bottom:1px solid var(--border)">${s.label} <span style="color:var(--text3)">· ETA ${s.eta}d</span></div>`).join('') +
+    `<div style="margin-top:6px;color:var(--yellow);font-size:10px">⚠ Illustrative — no free live cargo-tracking source exists.</div>
+     <div style="text-align:right;margin-top:4px"><span style="cursor:pointer;color:var(--accent)" onclick="this.closest('div').parentElement.remove()">Close ✕</span></div>`;
+  document.body.appendChild(pop);
+  setTimeout(() => { document.addEventListener('click', function h(e){ if(!pop.contains(e.target)){ pop.remove(); document.removeEventListener('click',h);} }); }, 50);
+}
+
+// ── Logistics map layer (chokepoints) + dropdown table of all minerals ──
+function renderLogisticsLayer(g, proj) {
+  CHOKEPOINTS.forEach(cp => {
+    const pt = proj([cp.lng, cp.lat]);
+    if (!pt) return;
+    const node = g.append('g').attr('class','layer-logistics').style('cursor','pointer').attr('transform',`translate(${pt[0]},${pt[1]})`);
+    node.append('circle').attr('r',7).attr('fill','#f97316').attr('fill-opacity',0.85).attr('stroke','#fff').attr('stroke-width',1);
+    node.append('circle').attr('r',13).attr('fill','#f97316').attr('fill-opacity',0.18).attr('class','hotspot');
+    node.append('title').text(`${cp.name}\n${cp.note}`);
+  });
+}
+
+function renderLogisticsPanel() {
+  const panel = document.createElement('div');
+  panel.id = 'logistics-panel';
+  panel.style.cssText = 'position:fixed;bottom:14px;left:280px;z-index:150;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 12px;width:340px;max-height:280px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,0.4)';
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div style="font-size:12px;font-weight:700;color:var(--text2)">🚧 Logistics — bottlenecks by mineral</div>
+      <span style="cursor:pointer;color:var(--text3)" onclick="document.getElementById('logistics-panel').style.display='none'">✕</span>
+    </div>
+    <select id="logistics-mineral-select" onchange="renderLogisticsTable(this.value)" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px;font-size:11px;margin-bottom:6px">
+      <option value="__all__">All minerals</option>
+      ${MINERALS.map(m=>`<option value="${m.id}">${m.icon} ${m.name}</option>`).join('')}
+    </select>
+    <div id="logistics-table"></div>
+  `;
+  document.body.appendChild(panel);
+  renderLogisticsTable('__all__');
+}
+
+function renderLogisticsTable(sel) {
+  const box = document.getElementById('logistics-table');
+  if (!box) return;
+  const list = sel === '__all__' ? MINERALS : MINERALS.filter(m=>m.id===sel);
+  box.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:10.5px">
+    <tr style="color:var(--text3);text-align:left"><th style="padding:3px 4px">Mineral</th><th style="padding:3px 4px">Top Producer</th><th style="padding:3px 4px">Main Chokepoint</th></tr>
+    ${list.map(m => {
+      const top = m.producers[0]; const c = COUNTRIES.find(x=>x.id===top.id);
+      const cp = CHOKEPOINTS.find(x=>x.id===m.chokepoints[0]);
+      return `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:4px">${m.icon} ${m.name}</td>
+        <td style="padding:4px">${c?c.flag+' '+c.name:'—'} (${top.share}%)</td>
+        <td style="padding:4px">${cp?cp.name:'—'}</td>
+      </tr>`;
+    }).join('')}
+  </table>`;
+}
 
 // ── Intra-regional inline bubble plot ────────────────────────
 // Override buildIntraTable to include an inline bubble chart section
@@ -9693,8 +10109,26 @@ renderPanel();
   </div>
 </div>
 
+<!-- SUPPLY CHAIN EXPLORER MODAL -->
+<div id="supplychain-overlay" onclick="if(event.target===this)closeSupplyChain()" style="display:none;position:fixed;inset:0;z-index:470;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;width:920px;max-width:97vw;max-height:92vh;overflow-y:auto;padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div style="font-size:16px;font-weight:700">🔗 Global Supply Chain Explorer</div>
+      <button onclick="closeSupplyChain()" style="background:none;border:none;color:var(--text2);font-size:22px;cursor:pointer">×</button>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:12px">Producer shares, companies, and ports are curated from public USGS/national production data. Vessel-level entries are illustrative — no free real-time cargo-tracking source exists.</div>
+    <div id="sc-chips" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:10px;margin-bottom:6px;border-bottom:1px solid var(--border)"></div>
+    <div id="sc-network" style="width:100%"></div>
+    <div id="sc-detail" style="margin-top:8px"></div>
+    <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="plotSupplyChainOnMap()" style="background:var(--accent);border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500">🗺️ Plot Entire Supply Chain on Map</button>
+      <button onclick="closeSupplyChain()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px">Close</button>
+    </div>
+  </div>
+</div>
+
 <style>
-  #drill-overlay.visible, #bubble-overlay.visible { display:flex !important; }
+  #drill-overlay.visible, #bubble-overlay.visible, #supplychain-overlay.visible { display:flex !important; }
 </style>
 
 <!-- MOBILE REGIONS PANEL -->
