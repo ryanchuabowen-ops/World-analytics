@@ -6800,7 +6800,7 @@ function renderCountryDetail(c) {
       <div class="kpi-grid">
         ${kpi('Peace Index', g.gpi.toFixed(3), 'GPI 2025 · lower = more peaceful')}
         ${kpi('Peace Level', g.gpi <= 1.42 ? '🟢 Very High' : g.gpi <= 1.8 ? '🟡 High' : g.gpi <= 2.2 ? '🟠 Medium' : g.gpi <= 2.8 ? '🔴 Low' : '⚫ Very Low', 'GPI 2025 category')}
-        ${MILITARY_2025[c.id] !== undefined ? kpi('Military Spend', MILITARY_2025[c.id]+'%', 'SIPRI 2025 · % of GDP') : ''}
+        ${MILITARY_2025[c.id] !== undefined ? kpi('Military Spend', MILITARY_2025[c.id]+'%', 'SIPRI via World Bank (live) · % of GDP') : ''}
       </div>
     </div>` : ''}
 
@@ -6818,8 +6818,9 @@ function renderCountryDetail(c) {
     <div class="metric-section">
       <div class="metric-section-title">💻 Technology <span style="font-size:9px;color:var(--text3);font-weight:400">World Bank / WIPO GII 2025 / ITU</span></div>
       <div class="kpi-grid">
-        ${kpi('R&D Spend', c.tech.rnd+'%', '% of GDP · World Bank')}
-        ${kpi('Patents', c.tech.patents >= 1000 ? (c.tech.patents/1000).toFixed(0)+'k' : c.tech.patents, 'annual · WIPO')}
+        ${kpi('R&D Spend', c.tech.rnd+'%', '% of GDP · World Bank (live)')}
+        ${c.tech.rndOECD !== undefined ? kpi('R&D Spend (OECD)', '$'+(c.tech.rndOECD/1000).toFixed(1)+'B', 'GERD, USD PPP · OECD.Stat (live)') : ''}
+        ${kpi('Patents', c.tech.patents >= 1000 ? (c.tech.patents/1000).toFixed(0)+'k' : c.tech.patents, 'resident applications · World Bank / WIPO (live)')}
         ${kpi('Unicorns', c.tech.unicorns, 'companies · CB Insights 2025')}
         ${kpi('Internet Users', c.internet+'%', 'ITU / World Bank')}
         ${kpi('Broadband', c.tech.broadband+'%', 'coverage · World Bank')}
@@ -6831,9 +6832,10 @@ function renderCountryDetail(c) {
       <div class="metric-section-title">📈 Economics <span style="font-size:9px;color:var(--text3);font-weight:400">IMF / World Bank</span></div>
       <div class="kpi-grid">
         ${kpi('Inflation (CPI)', c.inflation+'%', 'IMF WEO · annual')}
-        ${kpi('Unemployment', c.econ.unemployment+'%', 'ILO / World Bank')}
-        ${kpi('GINI Index', c.econ.gini, 'World Bank')}
-        ${kpi('Trade Volume', '$'+c.econ.trade+'B', 'World Bank')}
+        ${kpi('Unemployment', c.econ.unemployment+'%', 'ILO / World Bank (live)')}
+        ${c.econ.unemploymentEU !== undefined ? kpi('Unemployment (EU)', c.econ.unemploymentEU+'%', 'harmonized · Eurostat (live)') : ''}
+        ${kpi('GINI Index', c.econ.gini, 'World Bank (live)')}
+        ${kpi('Trade Volume', '$'+c.econ.trade+'B', 'exports + imports · World Bank (live)')}
         ${kpi('Govt Debt', c.econ.debt+'%', '% of GDP · IMF')}
         ${e2 ? kpi('GDP Growth', e2.gdpGrowth+'%', 'annual · IMF WEO') : ''}
         ${e2 ? kpi('FDI Inflows', '$'+e2.fdi+'B', 'World Bank') : ''}
@@ -6849,7 +6851,7 @@ function renderCountryDetail(c) {
       <div class="metric-section-title">💰 Finance <span style="font-size:9px;color:var(--text3);font-weight:400">World Bank / IMF / ExchangeRate-API</span></div>
       <div class="kpi-grid">
         ${kpi('Market Cap', '$'+c.fin.mcap+'B', 'World Bank GFDD')}
-        ${kpi('Banking Score', c.fin.banking+'/25', 'World Bank GFDD · est.')}
+        ${kpi('Bank Branch Density', c.fin.banking, 'per 100k adults · World Bank GFDD (live)')}
         ${kpi('VC Investment', '$'+c.fin.vc+'B', 'World Bank / Claude est.')}
         ${kpi('Forex Rate', c.fin.forex, 'vs USD · live ExchangeRate-API')}
       </div>
@@ -6859,18 +6861,21 @@ function renderCountryDetail(c) {
 
     <div style="margin-top:12px;padding:10px 12px;background:rgba(15,23,42,0.6);border:1px solid var(--border);border-radius:10px;font-size:10px;color:var(--text3);line-height:1.7">
       <div style="font-weight:600;color:var(--text2);margin-bottom:4px;font-size:11px">📋 Data Sources</div>
-      <div><span style="color:var(--accent2)">World Bank Open API</span> — GDP, healthcare, economics, environment, education, demographics (live)</div>
+      <div><span style="color:var(--accent2)">World Bank Open API</span> — GDP, healthcare, economics, environment, education, demographics, governance (WGI), trade, patents, military spend, bank density (live)</div>
       <div><span style="color:var(--accent2)">IMF DataMapper</span> — GDP growth, fiscal data (live)</div>
       <div><span style="color:var(--accent2)">WHO GHO API</span> — UHC index, mental health workers (live)</div>
+      <div><span style="color:var(--accent2)">Eurostat</span> — Harmonized EU unemployment rate (live)</div>
+      <div><span style="color:var(--accent2)">OECD.Stat</span> — Gross domestic R&D expenditure, OECD members (live)</div>
       <div><span style="color:var(--accent2)">ExchangeRate-API</span> — Forex rates (live, daily)</div>
-      <div><span style="color:var(--accent2)">TI CPI 2025</span> — Corruption Perceptions Index (annual CSV)</div>
-      <div><span style="color:var(--accent2)">RSF 2025</span> — Press Freedom Index 0-100 (annual CSV)</div>
-      <div><span style="color:var(--accent2)">Freedom House 2025</span> — Political rights & civil liberties (annual CSV)</div>
-      <div><span style="color:var(--accent2)">IEP GPI 2025</span> — Global Peace Index (annual CSV)</div>
-      <div><span style="color:var(--accent2)">SIPRI 2025</span> — Military expenditure % GDP (annual CSV)</div>
-      <div><span style="color:var(--accent2)">WIPO GII 2025</span> — Global Innovation Index (annual CSV)</div>
-      <div><span style="color:var(--accent2)">CB Insights 2025</span> — Unicorn company counts (annual report)</div>
-      <div><span style="color:var(--yellow)">Claude training data</span> — Fields marked "est." where no API/CSV available; cross-referenced against World Bank, WHO, IMF, UN publications up to May 2025</div>
+      <div><span style="color:var(--accent2)">TI CPI 2025</span> — Corruption Perceptions Index (annual CSV, no public API)</div>
+      <div><span style="color:var(--accent2)">RSF 2025</span> — Press Freedom Index 0-100 (annual CSV, no public API)</div>
+      <div><span style="color:var(--accent2)">Freedom House 2025</span> — Political rights & civil liberties (annual CSV, no public API)</div>
+      <div><span style="color:var(--accent2)">IEP GPI 2025</span> — Global Peace Index (annual CSV, no public API)</div>
+      <div><span style="color:var(--accent2)">WIPO GII 2025</span> — Global Innovation Index (annual CSV, no public API)</div>
+      <div><span style="color:var(--accent2)">UNDP HDR 2025</span> — Human Development Index, Gender Inequality Index (annual report, no public API)</div>
+      <div><span style="color:var(--accent2)">CB Insights 2025</span> — Unicorn company counts (annual report, no public API)</div>
+      <div><span style="color:var(--yellow)">Curated reference content</span> — Country narratives, conflict/war timelines, and news are static/curated (not live-sourced); fields marked "est." above have no public API and are cross-referenced against the sources listed, current as of the site's last content update</div>
+      <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><span style="color:var(--accent)">Fallback snapshot</span> — if live API calls fail, figures fall back to a daily scheduled snapshot (see <code style="color:var(--text2)">data/live-data.json</code>), then to the values baked into this page</div>
     </div>
 
     <button onclick="selectedCountry=null;renderPanel();try{d3.selectAll('.country').classed('selected',false);}catch(e){}"
@@ -7039,7 +7044,7 @@ const METRIC_DEFS = [
   { label: "Unicorn Companies",        fn: c => c.tech.unicorns,          fmt: v => Math.round(v) },
   { label: "Stock Market Cap ($B)",    fn: c => c.fin.mcap,               fmt: v => '$'+Math.round(v)+'B' },
   { label: "VC Investment ($B)",       fn: c => c.fin.vc,                 fmt: v => '$'+v.toFixed(1)+'B' },
-  { label: "Banking Score (/25)",      fn: c => c.fin.banking,            fmt: v => v.toFixed(0)+'/25' },
+  { label: "Bank Branches (/100k)",    fn: c => c.fin.banking,            fmt: v => v.toFixed(1) },
 ];
 
 let _regionalTab = 'inter';
@@ -7241,7 +7246,7 @@ function showGlobalComparison() {
       rows: [
         { label: "Stock Market Cap", fn: c=>c.fin.mcap, fmt: v=>`$${Math.round(v)}B` },
         { label: "VC Investment", fn: c=>c.fin.vc, fmt: v=>`$${v.toFixed(1)}B` },
-        { label: "Banking Sector Score", fn: c=>c.fin.banking, fmt: v=>v.toFixed(0)+'/25' },
+        { label: "Bank Branches (/100k)", fn: c=>c.fin.banking, fmt: v=>v.toFixed(1) },
         { label: "FDI Inflows ($B)", fn: c=>c.econ2?.fdi??null, fmt: v=>`$${v.toFixed(0)}B` },
         { label: "Foreign Reserves ($B)", fn: c=>c.econ2?.foreignReserves??null, fmt: v=>`$${v.toFixed(0)}B` },
         { label: "Remittances ($B)", fn: c=>c.econ2?.remittances??null, fmt: v=>`$${v.toFixed(0)}B` },
@@ -7691,7 +7696,7 @@ function showCompareModal() {
 
     ${metricRows('💰 Finance', [
       ['Market Cap ($B)', a._stub?'N/A':'$'+a.fin.mcap+'B', b._stub?'N/A':'$'+b.fin.mcap+'B'],
-      ['Banking Score', a._stub?'N/A':a.fin.banking+'/25', b._stub?'N/A':b.fin.banking+'/25'],
+      ['Bank Branches (/100k)', a._stub?'N/A':a.fin.banking, b._stub?'N/A':b.fin.banking],
       ['VC Investment ($B)', a._stub?'N/A':'$'+a.fin.vc+'B', b._stub?'N/A':'$'+b.fin.vc+'B'],
     ])}
 
@@ -7836,32 +7841,50 @@ renderCountryDetail = function(c) {
     </div></div>`:''}
     ${g?`<div class="metric-section"><div class="metric-section-title">⚖️ Governance</div><div class="kpi-grid">
       ${kpi('Democracy',g.democracyIdx+'/10','EIU')}${kpi('Corruption CPI',g.corruptionIdx+'/100')}
-      ${kpi('Rule of Law',g.ruleOfLaw,'-2.5 to 2.5')}${kpi('Press Freedom',g.pressFreedom,'RSF')}
-      ${kpi('Gov. Effectiveness',g.govEffectiveness)}
+      ${kpi('Rule of Law',g.ruleOfLaw,'World Bank WGI (live) · -2.5 to 2.5')}${kpi('Press Freedom',g.pressFreedom,'RSF')}
+      ${kpi('Gov. Effectiveness',g.govEffectiveness,'World Bank WGI (live) · -2.5 to 2.5')}
     </div></div>`:''}
     ${s?`<div class="metric-section"><div class="metric-section-title">🤝 Social</div><div class="kpi-grid">
       ${kpi('Poverty Rate',s.povertyRate+'%','< $2.15/day')}${kpi('Gender Inequality',s.gii,'GII')}
       ${kpi('Homicide Rate',s.homicideRate,'per 100k')}${kpi('Female Labour',s.femaleLabor+'%')}
       ${kpi('Social Protection',s.socialProtection+'%')}
     </div></div>`:''}
+    ${g&&g.gpi?`<div class="metric-section"><div class="metric-section-title">☮️ Peace &amp; Security</div><div class="kpi-grid">
+      ${kpi('Peace Index',g.gpi.toFixed(3),'GPI · lower = more peaceful')}
+      ${MILITARY_2025[c.id]!==undefined?kpi('Military Spend',MILITARY_2025[c.id]+'%','SIPRI via World Bank (live) · % of GDP'):''}
+    </div></div>`:''}
     <div class="metric-section"><div class="metric-section-title">💻 Technology</div><div class="kpi-grid">
-      ${kpi('R&D Spend',c.tech.rnd+'%','% of GDP')}
-      ${kpi('Patents',c.tech.patents>=1000?(c.tech.patents/1000).toFixed(0)+'k':c.tech.patents,'annual')}
+      ${kpi('R&D Spend',c.tech.rnd+'%','% of GDP · World Bank (live)')}
+      ${c.tech.rndOECD!==undefined?kpi('R&D Spend (OECD)','$'+(c.tech.rndOECD/1000).toFixed(1)+'B','GERD, USD PPP · OECD.Stat (live)'):''}
+      ${kpi('Patents',c.tech.patents>=1000?(c.tech.patents/1000).toFixed(0)+'k':c.tech.patents,'World Bank / WIPO (live)')}
       ${kpi('Unicorns',c.tech.unicorns,'companies')}${kpi('Broadband',c.tech.broadband+'%','coverage')}
     </div></div>
     <div class="metric-section"><div class="metric-section-title">📈 Economics</div><div class="kpi-grid">
-      ${kpi('Unemployment',c.econ.unemployment+'%')}${kpi('GINI Index',c.econ.gini)}
-      ${kpi('Trade Volume','$'+c.econ.trade+'B')}${kpi('Govt Debt',c.econ.debt+'%','% of GDP')}
+      ${kpi('Unemployment',c.econ.unemployment+'%','World Bank (live)')}
+      ${c.econ.unemploymentEU!==undefined?kpi('Unemployment (EU)',c.econ.unemploymentEU+'%','harmonized · Eurostat (live)'):''}
+      ${kpi('GINI Index',c.econ.gini,'World Bank (live)')}
+      ${kpi('Trade Volume','$'+c.econ.trade+'B','exports + imports · World Bank (live)')}${kpi('Govt Debt',c.econ.debt+'%','% of GDP')}
       ${e2?kpi('GDP Growth',e2.gdpGrowth+'%','annual'):''}${e2?kpi('FDI Inflows','$'+e2.fdi+'B'):''}
       ${e2?kpi('Reserves','$'+e2.foreignReserves+'B'):''}${e2?kpi('Current Acc.',e2.currentAccount+'%','% GDP'):''}
       ${e2?kpi('External Debt',e2.externalDebt+'%','% GNI'):''}${e2?kpi('Remittances','$'+e2.remittances+'B'):''}
       ${e2?kpi('Gross Savings',e2.savings+'%','% GDP'):''}
     </div></div>
     <div class="metric-section"><div class="metric-section-title">💰 Finance</div><div class="kpi-grid">
-      ${kpi('Market Cap','$'+c.fin.mcap+'B')}${kpi('Banking Score',c.fin.banking+'/25')}
-      ${kpi('VC Investment','$'+c.fin.vc+'B')}${kpi('Forex Rate',c.fin.forex,'vs USD')}
+      ${kpi('Market Cap','$'+c.fin.mcap+'B')}${kpi('Bank Branches (/100k)',c.fin.banking,'World Bank GFDD (live)')}
+      ${kpi('VC Investment','$'+c.fin.vc+'B')}${kpi('Forex Rate',c.fin.forex,'vs USD · live ExchangeRate-API')}
     </div></div>
     ${renderProfileSection(c)}
+    <div style="margin-top:12px;padding:10px 12px;background:rgba(15,23,42,0.6);border:1px solid var(--border);border-radius:10px;font-size:10px;color:var(--text3);line-height:1.7">
+      <div style="font-weight:600;color:var(--text2);margin-bottom:4px;font-size:11px">📋 Data Sources</div>
+      <div><span style="color:var(--accent2)">World Bank Open API</span> — GDP, healthcare, economics, environment, education, demographics, governance (WGI), trade, patents, military spend, bank density (live)</div>
+      <div><span style="color:var(--accent2)">IMF DataMapper</span> — GDP growth, fiscal data (live)</div>
+      <div><span style="color:var(--accent2)">WHO GHO API</span> — UHC index, mental health workers (live)</div>
+      <div><span style="color:var(--accent2)">Eurostat</span> — Harmonized EU unemployment rate (live)</div>
+      <div><span style="color:var(--accent2)">OECD.Stat</span> — Gross domestic R&D expenditure, OECD members (live)</div>
+      <div><span style="color:var(--accent2)">ExchangeRate-API</span> — Forex rates (live, daily)</div>
+      <div><span style="color:var(--yellow)">Curated reference content</span> — country narratives, conflict/war timelines, and news are static/curated, not live-sourced; other fields with no public API (CPI, EIU, RSF, Freedom House, GPI, GII, HDI, unicorn counts) are annual reports cross-referenced at last content update</div>
+      <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><span style="color:var(--accent)">Fallback snapshot</span> — if live API calls fail, figures fall back to a daily scheduled snapshot, then to the values baked into this page</div>
+    </div>
     <button onclick="selectedCountry=null;renderPanel();try{d3.selectAll('.country').classed('selected',false);}catch(e){}"
       style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text2);border-radius:8px;padding:8px;cursor:pointer;font-size:13px;margin-top:4px">
       ← Back to Rankings
@@ -9359,7 +9382,7 @@ showGlobalComparison = (function(_prev) {
       { rows: [
         { label:"Stock Market Cap",  fn:c=>c.fin.mcap,         fmt:v=>`$${Math.round(v)}B` },
         { label:"VC Investment",     fn:c=>c.fin.vc,           fmt:v=>`$${v.toFixed(1)}B` },
-        { label:"Banking Score",     fn:c=>c.fin.banking,      fmt:v=>v.toFixed(0)+'/25' },
+        { label:"Bank Branches (/100k)", fn:c=>c.fin.banking,  fmt:v=>v.toFixed(1) },
         { label:"FDI Inflows",       fn:c=>c.econ2?.fdi??0,    fmt:v=>`$${v.toFixed(0)}B` },
       ]},
       { rows: [
@@ -9800,7 +9823,7 @@ Object.entries(ISO3).forEach(([id, iso3]) => { ISO3_TO_ID[iso3] = +id; });
 // Returns { [ISO2_UPPER]: value } for most-recent non-null year
 async function wbFetch(indicator) {
   try {
-    const url = `https://api.worldbank.org/v2/country/all/indicator/${indicator}?format=json&mrv=1&mrnev=1&per_page=300`;
+    const url = `https://api.worldbank.org/v2/country/all/indicator/${indicator}?format=json&mrv=1&per_page=400`;
     const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
     if (!r.ok) return {};
     const [, data] = await r.json();
@@ -9832,6 +9855,100 @@ async function whoFetch(indicator) {
   } catch { return {}; }
 }
 
+// ── Eurostat fetch helper (JSON-stat 2.0) ───────────────────────
+// Returns { [geoCode]: mostRecentValue } across all EU/EEA geos in one call.
+async function eurostatFetch(dataset, query) {
+  try {
+    const url = `https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/${dataset}?format=JSON&${query}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return {};
+    const j = await r.json();
+    const dims = j.id, sizes = j.size;
+    const geoIdx = dims.indexOf('geo'), timeIdx = dims.indexOf('time');
+    if (geoIdx < 0 || timeIdx < 0 || !j.dimension?.geo || !j.dimension?.time) return {};
+    const strides = sizes.map((_, i) => sizes.slice(i + 1).reduce((a, b) => a * b, 1));
+    const geoCats = Object.entries(j.dimension.geo.category.index);
+    const timeCats = Object.entries(j.dimension.time.category.index).sort((a, b) => b[1] - a[1]);
+    const out = {};
+    geoCats.forEach(([geoCode, gi]) => {
+      for (const [, ti] of timeCats) {
+        let flat = 0;
+        for (let d = 0; d < dims.length; d++) flat += (d === geoIdx ? gi : d === timeIdx ? ti : 0) * strides[d];
+        const v = j.value[flat];
+        if (v !== undefined && v !== null) { out[geoCode] = v; break; }
+      }
+    });
+    return out;
+  } catch { return {}; }
+}
+
+// ── OECD fetch helper (generic SDMX-JSON 2.0) ───────────────────
+// Returns { [ISO3]: mostRecentValue } for a dataflow, restricted to observations
+// matching every dimension:value pair in `filters`.
+async function oecdFetch(dataflow, filters) {
+  try {
+    const url = `https://sdmx.oecd.org/public/rest/data/${dataflow}/all?lastNObservations=1&dimensionAtObservation=AllDimensions&format=jsondata`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return {};
+    const j = await r.json();
+    const dims = j.data?.structures?.[0]?.dimensions?.observation;
+    const obs = j.data?.dataSets?.[0]?.observations;
+    if (!dims || !obs) return {};
+    const refAreaIdx = dims.findIndex(d => d.id === 'REF_AREA');
+    if (refAreaIdx < 0) return {};
+    const out = {};
+    Object.entries(obs).forEach(([key, val]) => {
+      const idxs = key.split(':').map(Number);
+      for (const [dimId, wantId] of Object.entries(filters)) {
+        const di = dims.findIndex(d => d.id === dimId);
+        if (di >= 0 && dims[di].values[idxs[di]]?.id !== wantId) return;
+      }
+      const area = dims[refAreaIdx].values[idxs[refAreaIdx]]?.id;
+      const v = val[0];
+      if (area && v !== null && v !== undefined) out[area] = v;
+    });
+    return out;
+  } catch { return {}; }
+}
+
+// ── Deep-patch helper: copies only present leaf values, never wipes objects ──
+function deepPatch(target, patch) {
+  if (!patch || !target) return;
+  Object.entries(patch).forEach(([k, v]) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if (!target[k]) target[k] = {};
+      deepPatch(target[k], v);
+    } else if (v !== null && v !== undefined) {
+      target[k] = v;
+    }
+  });
+}
+
+// ── Scheduled-snapshot loader ────────────────────────────────────
+// Loads data/live-data.json, refreshed daily by a GitHub Actions job (see
+// scripts/fetch-data.mjs), and applies it as a fast baseline before the
+// in-browser live fetch runs. Guarantees data no older than the last
+// successful scheduled run even if live API calls are blocked (corporate
+// firewalls, ad blockers, an API being temporarily down, etc).
+async function loadSnapshot() {
+  try {
+    const r = await fetch('data/live-data.json', { cache: 'no-cache', signal: AbortSignal.timeout(6000) });
+    if (!r.ok) return null;
+    const snap = await r.json();
+    Object.entries(snap.countries || {}).forEach(([idStr, s]) => {
+      const id = +idStr;
+      const c = COUNTRIES.find(x => x.id === id);
+      if (!c) return;
+      deepPatch(c, { gdp: s.gdp, lifeExp: s.lifeExp, internet: s.internet, inflation: s.inflation,
+        healthcare: s.healthcare, tech: s.tech, econ: s.econ, fin: s.fin });
+      if (s.military !== undefined && s.military !== null) MILITARY_2025[id] = s.military;
+      if (EXTENDED[id] && s.extended) deepPatch(EXTENDED[id], s.extended);
+      if (EXTENDED[id]) Object.assign(c, EXTENDED[id]);
+    });
+    return snap.meta || null;
+  } catch { return null; }
+}
+
 // ── Merge helper: apply a value to the right field ─────────────
 function set(obj, path, val) {
   if (val === null || val === undefined || isNaN(val)) return;
@@ -9857,10 +9974,15 @@ async function loadLiveData() {
     'display:flex;align-items:center;gap:7px;max-width:280px',
     'box-shadow:0 4px 16px rgba(0,0,0,0.4)'
   ].join(';');
-  badge.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Fetching live data…';
+  badge.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Loading snapshot…';
   document.head.insertAdjacentHTML('beforeend',
     '<style>@keyframes spin{to{transform:rotate(360deg)}}</style>');
   document.body.appendChild(badge);
+
+  // Fast baseline from the daily scheduled snapshot, applied before slower
+  // live calls so the page never shows only the numbers baked into this file.
+  const snapMeta = await loadSnapshot();
+  if (snapMeta) { renderPanel(); badge.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Fetching live data…'; }
 
   // ── Define all World Bank indicators to fetch ─────────────────
   const WB = [
@@ -9918,6 +10040,17 @@ async function loadLiveData() {
     ['SL.TLF.CACT.FE.ZS', '_soc_femlbr',v => Math.round(v)],
     // Finance
     ['CM.MKT.LCAP.CD',    '_fin_mcap',  v => Math.round(v/1e9)],
+    ['FB.CBK.BRCH.P5',    '_fin_bank',  v => +v.toFixed(1)],
+    // Trade (COUNTRIES-level, summed below)
+    ['NE.EXP.GNFS.CD',    '_trade_exp', v => v],
+    ['NE.IMP.GNFS.CD',    '_trade_imp', v => v],
+    // Tech — patents (COUNTRIES-level)
+    ['IP.PAT.RESD',       '_tech_pat',  v => Math.round(v)],
+    // Military expenditure, % of GDP (SIPRI via World Bank)
+    ['MS.MIL.XPND.GD.ZS', '_mil_pct',   v => +v.toFixed(1)],
+    // Worldwide Governance Indicators (gov, EXTENDED)
+    ['GOV_WGI_RL.EST',    '_gov_rol',   v => +v.toFixed(2)],
+    ['GOV_WGI_GE.EST',    '_gov_geff',  v => +v.toFixed(2)],
   ];
 
   try {
@@ -9935,6 +10068,14 @@ async function loadLiveData() {
     // WHO GHO — secondary load (healthcare extras not in WB)
     const [whoMentalH] = await Promise.all([
       whoFetch('MH_18'),  // Mental health workers per 100k
+    ]);
+
+    // Eurostat — harmonized EU unemployment (authoritative for EU member states)
+    // OECD — gross domestic R&D expenditure, total sector/type, USD PPP (member states)
+    const [eurostatUnemp, oecdGerd] = await Promise.all([
+      eurostatFetch('une_rt_a', 'sex=T&age=Y15-74&unit=PC_ACT&sinceTimePeriod=2022'),
+      oecdFetch('OECD.STI.STP,DSD_RDS_GERD@DF_GERD_TORD,1.0',
+        { SECT_PERF: '_T', TYPE_RD: '_T', UNIT_MEASURE: 'USD_PPP', PRICE_BASE: 'V' }),
     ]);
 
     // Build flat keyed maps: _key → { [ISO2]: value }
@@ -9974,9 +10115,18 @@ async function loadLiveData() {
       if (has('_econ_gini'))    c.econ.gini    = gv('_econ_gini');
       if (has('_econ_debt'))    c.econ.debt    = gv('_econ_debt');
       if (has('_fin_mcap'))     c.fin.mcap     = gv('_fin_mcap');
+      if (has('_fin_bank'))     c.fin.banking  = gv('_fin_bank');
+      if (has('_tech_pat'))     c.tech.patents = gv('_tech_pat');
+      if (has('_trade_exp') && has('_trade_imp'))
+        c.econ.trade = Math.round((gv('_trade_exp') + gv('_trade_imp')) / 1e9);
+      if (has('_mil_pct'))      MILITARY_2025[id] = gv('_mil_pct');
 
       // EXTENDED — only patch if the entry already exists (hardcoded or from prior live load)
       if (!ex) return;
+
+      if (!ex.gov) ex.gov = {};
+      if (has('_gov_rol'))  ex.gov.ruleOfLaw       = gv('_gov_rol');
+      if (has('_gov_geff')) ex.gov.govEffectiveness = gv('_gov_geff');
 
       // Patch individual fields — never replace entire sub-objects
       if (ex.demo) {
@@ -10053,6 +10203,26 @@ async function loadLiveData() {
       });
     }
 
+    // Eurostat — overrides econ.unemployment for EU member states with the
+    // harmonized Eurostat figure (more authoritative than WB's modeled ILO estimate for the EU)
+    const EUROSTAT_GEO_FIX = { EL: 'GR', UK: 'GB' }; // Eurostat's non-ISO codes
+    Object.entries(eurostatUnemp).forEach(([geo, v]) => {
+      const iso2 = EUROSTAT_GEO_FIX[geo] || geo;
+      const id = CODE2ID[iso2];
+      if (id !== undefined && v !== null) {
+        const c = COUNTRIES.find(x => x.id === id);
+        if (c) c.econ.unemploymentEU = +v.toFixed(1);
+      }
+    });
+
+    // OECD — supplementary R&D expenditure (USD PPP, millions), OECD member states only
+    Object.entries(oecdGerd).forEach(([iso3, v]) => {
+      const id = ISO3_TO_ID[iso3];
+      if (id === undefined || v === null) return;
+      const c = COUNTRIES.find(x => x.id === id);
+      if (c && c.tech) c.tech.rndOECD = Math.round(v);
+    });
+
     // Re-apply EXTENDED merge so c.gov, c.demo etc. are in sync
     COUNTRIES.forEach(c => {
       if (EXTENDED[c.id]) Object.assign(c, EXTENDED[c.id]);
@@ -10060,7 +10230,11 @@ async function loadLiveData() {
 
     // Update badge → success
     const yr = new Date().getFullYear();
-    badge.innerHTML = `✅ Live · World Bank ${yr} · IMF · Forex · WHO`;
+    const extraSrc = [
+      Object.keys(eurostatUnemp).length ? 'Eurostat' : null,
+      Object.keys(oecdGerd).length ? 'OECD' : null,
+    ].filter(Boolean).join(' · ');
+    badge.innerHTML = `✅ Live · World Bank ${yr} · IMF · Forex · WHO${extraSrc ? ' · ' + extraSrc : ''}`;
     badge.style.borderColor = 'rgba(16,185,129,0.5)';
     badge.style.color = '#6ee7b7';
     setTimeout(() => {
@@ -10074,10 +10248,12 @@ async function loadLiveData() {
 
   } catch(err) {
     console.warn('[Atlas] Live data load failed:', err);
-    badge.innerHTML = '⚠️ Cached data · APIs unavailable';
+    badge.innerHTML = snapMeta
+      ? `⚠️ Live APIs unavailable · showing ${snapMeta.generatedAt ? new Date(snapMeta.generatedAt).toLocaleDateString() : 'scheduled'} snapshot`
+      : '⚠️ Cached data · APIs unavailable';
     badge.style.borderColor = 'rgba(245,158,11,0.4)';
     badge.style.color = '#fcd34d';
-    setTimeout(() => badge.remove(), 4000);
+    setTimeout(() => badge.remove(), 5000);
   }
 }
 

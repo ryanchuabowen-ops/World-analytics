@@ -1,6 +1,6 @@
 // World Atlas — Service Worker
 // Cache version — bump this string to force a cache refresh on next visit
-const CACHE = 'atlas-v1';
+const CACHE = 'atlas-v2';
 
 // Assets to pre-cache on install
 const PRECACHE = [
@@ -43,6 +43,22 @@ self.addEventListener('fetch', event => {
           return response;
         })
         .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  // Network-first for the live-data snapshot — it's refreshed daily, so a
+  // stale cached copy is worse than a fresh network fetch; only fall back to
+  // cache when offline.
+  if (url.pathname.endsWith('/data/live-data.json')) {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          const clone = response.clone();
+          caches.open(CACHE).then(cache => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
     );
     return;
   }
