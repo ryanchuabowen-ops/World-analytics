@@ -1,0 +1,13 @@
+{
+  "name": "world-atlas-data",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fetch:data": "node scripts/fetch-data.mjs",
+    "fetch:supplychain": "node scripts/fetch-supplychain.mjs",
+    "fetch:conflict-index": "node scripts/fetch-conflict-index.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

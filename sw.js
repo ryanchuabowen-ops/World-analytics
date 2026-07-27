@@ -1,6 +1,6 @@
 // World Atlas — Service Worker
 // Cache version — bump this string to force a cache refresh on next visit
-const CACHE = 'atlas-v2';
+const CACHE = 'atlas-v4';
 
 // Assets to pre-cache on install
 const PRECACHE = [
@@ -47,10 +47,9 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Network-first for the live-data snapshot — it's refreshed daily, so a
-  // stale cached copy is worse than a fresh network fetch; only fall back to
-  // cache when offline.
-  if (url.pathname.endsWith('/data/live-data.json')) {
+  // Network-first for daily-refreshed data snapshots — a stale cached copy is
+  // worse than a fresh network fetch; only fall back to cache when offline.
+  if (/\/data\/(live-data|supply-chain-data|supply-chain-history|conflict-index)\.json$/.test(url.pathname)) {
     event.respondWith(
       fetch(event.request)
         .then(response => {

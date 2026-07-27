@@ -30,17 +30,32 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install dependencies (Playwright, for the conflict-index scraper)
+        run: npm ci
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
       - name: Fetch latest indicators
         run: node scripts/fetch-data.mjs
 
+      - name: Fetch supply-chain trade data (UN Comtrade, free public tier)
+        run: node scripts/fetch-supplychain.mjs
+
+      - name: Fetch live conflict risk data (ACLED Conflict Index, public dashboard)
+        run: node scripts/fetch-conflict-index.mjs
+
       - name: Commit snapshot if changed
         run: |
-          if git diff --quiet -- data/live-data.json; then
+          FILES="data/live-data.json data/supply-chain-data.json data/supply-chain-history.json data/conflict-index.json"
+          # `git diff` alone misses brand-new untracked files (e.g. the first time a
+          # data file is created), so check status too.
+          if git diff --quiet -- $FILES && [ -z "$(git status --porcelain -- $FILES)" ]; then
             echo "No data changes."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/live-data.json
+          git add $FILES
           git commit -m "chore: refresh live data snapshot"
           git push
