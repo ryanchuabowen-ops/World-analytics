@@ -955,6 +955,7 @@
       <div class="layer-item"><div class="layer-dot" style="background:var(--green)"></div>Trade Routes<div class="layer-toggle" id="toggle-trade" onclick="toggleLayer(this,&#39;trade&#39;)"></div></div>
       <div class="layer-item"><div class="layer-dot" style="background:var(--yellow)"></div>Data Centers<div class="layer-toggle" id="toggle-data" onclick="toggleLayer(this,&#39;data&#39;)"></div></div>
       <div class="layer-item"><div class="layer-dot" style="background:var(--red)"></div>Risk Zones <span style="color:var(--text3);font-size:9px">(ACLED, live)</span><div class="layer-toggle" id="toggle-risk" onclick="toggleLayer(this,&#39;risk&#39;)"></div></div>
+      <div class="layer-item"><div class="layer-dot" style="background:var(--accent3)"></div>Critical Minerals <span style="color:var(--text3);font-size:9px">(export share)</span><div class="layer-toggle" id="toggle-minerals" onclick="toggleLayer(this,&#39;minerals&#39;)"></div></div>
     </div>
   </div>
 
@@ -4704,6 +4705,16 @@ function showTooltip(event, d) {
       <div class="tooltip-row"><span>Internet Access</span><span class="tooltip-val">${c.internet}%</span></div>
       <div class="tooltip-row"><span>Region</span><span class="tooltip-val">${c.region}</span></div>
     `;
+  }
+  if (_mineralsLayerOn) {
+    const exports = countryMineralExports(+d.id);
+    if (exports.length) {
+      tooltip.innerHTML += `
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:700;color:#8b5cf6;margin-bottom:4px">⛏️ Critical Mineral Exports</div>
+          ${exports.map(e => `<div class="tooltip-row"><span>${e.mineral.icon} ${e.mineral.name}</span><span class="tooltip-val">~${e.share}%</span></div>`).join('')}
+        </div>`;
+    }
   }
   tooltip.classList.add('visible');
   moveTooltip(event);
@@ -9528,6 +9539,63 @@ function renderRiskZones(g) {
   });
 }
 
+// ── Critical Minerals Export layer ──────────────────────────
+// Replaces the old standalone "Risk & Alerts" tab: instead of a separate list
+// view, concentration risk now lives directly on the map. Any country that is
+// a curated producer of at least one tracked mineral (MINERALS[].producers —
+// e.g. DR Congo supplying the majority of world cobalt) gets a diagonal-hatch
+// shading, denser for a bigger global export share. Hovering the country (the
+// same tooltip used everywhere else on the map) lists exactly which critical
+// minerals it exports and at what share — see the extra section appended in
+// showTooltip().
+let _mineralsLayerOn = false;
+
+function countryMineralExports(countryId) {
+  const out = [];
+  MINERALS.forEach(m => {
+    const p = (m.producers||[]).find(x => x.id === countryId);
+    if (p) out.push({ mineral: m, share: p.share });
+  });
+  return out.sort((a,b) => b.share - a.share);
+}
+
+function ensureHatchPattern(svg) {
+  let defs = svg.select('defs');
+  if (defs.empty()) defs = svg.insert('defs', ':first-child');
+  if (!defs.select('#minerals-hatch').empty()) return;
+  const pat = defs.append('pattern').attr('id','minerals-hatch')
+    .attr('width',6).attr('height',6).attr('patternUnits','userSpaceOnUse').attr('patternTransform','rotate(45)');
+  pat.append('rect').attr('width',6).attr('height',6).attr('fill','none');
+  pat.append('line').attr('x1',0).attr('y1',0).attr('x2',0).attr('y2',6)
+    .attr('stroke','#8b5cf6').attr('stroke-width',2.4);
+}
+
+function renderMineralsLayer(g) {
+  const svg = d3.select('#world-map');
+  ensureHatchPattern(svg);
+  const byCountry = new Map();
+  MINERALS.forEach(m => (m.producers||[]).forEach(p => {
+    const best = byCountry.get(p.id);
+    if (!best || p.share > best) byCountry.set(p.id, p.share);
+  }));
+  d3.selectAll('.country').each(function(d) {
+    const id = +d.id;
+    if (!byCountry.has(id)) return;
+    const maxShare = byCountry.get(id);
+    const exports = countryMineralExports(id);
+    const clone = d3.select(this).clone(true)
+      .attr('class','layer-minerals')
+      .attr('fill','url(#minerals-hatch)')
+      .attr('fill-opacity', Math.min(0.9, 0.35 + maxShare/150))
+      .attr('stroke','#8b5cf6').attr('stroke-width',1).attr('stroke-opacity',0.6)
+      .style('pointer-events','all').style('cursor','pointer');
+    clone.append('title').text(
+      `${exports.length} critical mineral export${exports.length>1?'s':''}: ` +
+      exports.map(e => `${e.mineral.name} (~${e.share}%)`).join(', ')
+    );
+  });
+}
+
 // Override toggleLayer to actually render/remove overlays
 toggleLayer = function(el, layer) {
   el.classList.toggle('on');
@@ -9563,6 +9631,10 @@ toggleLayer = function(el, layer) {
   } else if (layer === 'risk') {
     svg.selectAll('.layer-risk').remove();
     if (isOn) renderRiskZones(g);
+  } else if (layer === 'minerals') {
+    _mineralsLayerOn = isOn;
+    svg.selectAll('.layer-minerals').remove();
+    if (isOn) renderMineralsLayer(g);
   }
 };
 
@@ -9895,11 +9967,20 @@ let _scStageDetail = null;
 let _scCountryFilter = '__all__', _scCompanyFilter = '';
 let _scActiveTopTab = 'explorer';
 
+// Tab order follows the natural thought process: discover finished-good
+// composition → drill into one commodity's full chain → assess concentration
+// risk → compare across stages/commodities → pin what matters for ongoing
+// tracking. Each tab hands off context (selected mineral/stage/product) to
+// the next via updateSCContextBar(), so switching tabs feels like continuing
+// one investigation rather than jumping between five separate tools.
+const SC_TAB_ORDER = ['products','explorer','compare','dashboard'];
 function setSCTab(name) {
   _scActiveTopTab = name;
-  ['explorer','products','dashboard','risk','compare'].forEach(t => {
+  SC_TAB_ORDER.forEach(t => {
     const on = t === name;
-    document.getElementById('sc-tab-'+t).style.display = on ? '' : 'none';
+    const panel = document.getElementById('sc-tab-'+t);
+    panel.style.display = on ? '' : 'none';
+    if (on) { panel.classList.remove('sc-tab-panel'); void panel.offsetWidth; panel.classList.add('sc-tab-panel'); }
     const btn = document.getElementById('sc-toptab-'+t);
     btn.style.background = on ? 'var(--accent)' : 'none';
     btn.style.color = on ? '#fff' : 'var(--text2)';
@@ -9907,8 +9988,26 @@ function setSCTab(name) {
   });
   if (name === 'products') renderSCProducts();
   if (name === 'dashboard') renderSCDashboard();
-  if (name === 'risk') renderSCRisk();
   if (name === 'compare') renderSCCompare();
+  updateSCContextBar();
+}
+
+// Persistent strip (visible on every tab) showing what's currently being
+// investigated, so Risk/Compare/Dashboard read as continuations of the same
+// exploration rather than disconnected views.
+function updateSCContextBar() {
+  const el = document.getElementById('sc-context-current');
+  if (!el) return;
+  if (_scActiveTopTab === 'products' && _scProduct) {
+    const p = PRODUCT_MAP[_scProduct];
+    el.innerHTML = p ? `📍 Viewing <b>${p.icon} ${p.name}</b> — click any input to drill into its chain` : '';
+    return;
+  }
+  if (!_scMineral) { el.innerHTML = ''; return; }
+  const m = MINERAL_MAP[_scMineral];
+  const stage = (m.stages||[]).find(s=>s.id===_scStage) || (m.stages||[])[0];
+  el.innerHTML = `📍 Exploring <span class="sc-jump" onclick="setSCTab('explorer')"><b>${m.icon} ${m.name}</b> — ${stage?.label||''}</span>` +
+    (_scActiveTopTab!=='explorer' ? ` <span style="color:var(--text3)">· click to open in Explorer</span>` : '');
 }
 
 function openSupplyChain() {
@@ -9948,10 +10047,11 @@ function currentStage() {
 
 function renderSCChips() {
   return MINERALS.map(m => `
-    <div onclick="selectSCMineral('${m.id}')" style="flex-shrink:0;cursor:pointer;padding:6px 12px;border-radius:20px;
+    <div class="sc-chip" onclick="selectSCMineral('${m.id}')" style="flex-shrink:0;cursor:pointer;padding:7px 14px;border-radius:20px;
       border:1px solid ${_scMineral===m.id?'var(--accent)':'var(--border)'};
       background:${_scMineral===m.id?'rgba(59,130,246,0.18)':'var(--surface2)'};
-      color:${_scMineral===m.id?'var(--accent)':'var(--text2)'};font-size:12px;white-space:nowrap">
+      color:${_scMineral===m.id?'var(--accent)':'var(--text2)'};font-size:12px;font-weight:${_scMineral===m.id?'600':'400'};white-space:nowrap;
+      ${_scMineral===m.id?'box-shadow:0 0 0 3px rgba(59,130,246,0.12)':''}">
       ${m.icon} ${m.name}
     </div>`).join('');
 }
@@ -9961,11 +10061,12 @@ function renderSCChips() {
 function renderSCStageTabs() {
   const m = MINERAL_MAP[_scMineral];
   const box = document.getElementById('sc-stage-tabs');
-  box.innerHTML = `<span style="font-size:11px;color:var(--text3);align-self:center;margin-right:2px">Table for stage:</span>` +
+  box.innerHTML = `<span style="font-size:11px;color:var(--text3);align-self:center;margin-right:4px;font-weight:600">Table for stage</span>` +
     (m.stages||[]).map(s => `
-    <button onclick="selectSCStage('${s.id}')" style="border:1px solid ${_scStage===s.id?'var(--accent)':'var(--border)'};
+    <button class="sc-stage-btn" onclick="selectSCStage('${s.id}')" style="border:1px solid ${_scStage===s.id?'var(--accent)':'var(--border)'};
       background:${_scStage===s.id?'rgba(59,130,246,0.15)':'var(--surface2)'};color:${_scStage===s.id?'var(--accent)':'var(--text2)'};
-      border-radius:7px;padding:5px 12px;font-size:12px;cursor:pointer">${s.label}</button>`).join('');
+      font-weight:${_scStage===s.id?'600':'400'};
+      border-radius:20px;padding:5px 13px;font-size:12px;cursor:pointer">${s.label}</button>`).join('');
 }
 
 function selectSCMineral(id) {
@@ -9979,12 +10080,14 @@ function selectSCMineral(id) {
   renderSCTables();
   renderSCDetail();
   renderStageDetail();
+  updateSCContextBar();
 }
 
 function selectSCStage(stageId) {
   _scStage = stageId;
   renderSCStageTabs();
   renderSCTables();
+  updateSCContextBar();
 }
 
 // Union of every seller seen across all stages, for the country filter dropdown.
@@ -10001,17 +10104,17 @@ function renderSCFilterBar() {
   const box = document.getElementById('sc-filter-bar');
   const countryOpts = allChainCountries();
   box.innerHTML = `
-    <label style="font-size:11px;color:var(--text3)">Filter by country
-      <select id="sc-filter-country" onchange="setSCCountryFilter(this.value)" style="margin-left:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px">
+    <label style="font-size:11.5px;color:var(--text2);display:flex;align-items:center;gap:6px">🌍 Country
+      <select id="sc-filter-country" class="sc-select" onchange="setSCCountryFilter(this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:5px 10px;font-size:12px">
         <option value="__all__">All countries</option>
         ${countryOpts.map(c=>`<option value="${c.id}" ${_scCountryFilter==String(c.id)?'selected':''}>${c.flag} ${c.name}</option>`).join('')}
       </select>
     </label>
-    <label style="font-size:11px;color:var(--text3)">Filter by company
-      <input id="sc-filter-company" value="${_scCompanyFilter}" oninput="setSCCompanyFilter(this.value)" placeholder="e.g. Rio Tinto"
-        style="margin-left:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px;width:150px">
+    <label style="font-size:11.5px;color:var(--text2);display:flex;align-items:center;gap:6px">🏢 Company
+      <input id="sc-filter-company" class="sc-input" value="${_scCompanyFilter}" oninput="setSCCompanyFilter(this.value)" placeholder="e.g. Rio Tinto"
+        style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:5px 10px;font-size:12px;width:160px">
     </label>
-    ${(_scCountryFilter!=='__all__'||_scCompanyFilter) ? `<span onclick="clearSCFilters()" style="cursor:pointer;color:var(--accent);font-size:11px">✕ Clear filters</span>` : ''}
+    ${(_scCountryFilter!=='__all__'||_scCompanyFilter) ? `<span class="sc-clear-btn" onclick="clearSCFilters()" style="cursor:pointer;color:var(--text2);font-size:11.5px;border:1px solid var(--border);background:var(--surface);border-radius:20px;padding:5px 12px">✕ Clear filters</span>` : ''}
   `;
 }
 function setSCCountryFilter(v) { selectSCCountry(v==='__all__' ? null : +v); }
@@ -10023,6 +10126,13 @@ function clearSCFilters() { _scCountryFilter='__all__'; _scCompanyFilter=''; _sc
 // attributed (real trade data), the final column is company-attributed (curated — no
 // per-company market-share data exists, so companies are shown as an evenly-weighted
 // list of known major players, not a claimed precise split). ──
+// ── Bloomberg-terminal-style hub diagram: a center node (the mineral) with one
+// branch per stage, each branch a two-level tree — center → aggregate hub
+// ("Refined copper (cathode) · 6" — a small labeled node, like Bloomberg's
+// "259 Suppliers") → individual leaf boxes (countries, or companies for the
+// final branch). Thin single-color lines only, no filled bipartite ribbons —
+// each branch's leaves stay local to that branch's own row, so nothing crosses
+// or piles up the way a full mesh between adjacent columns would. ──
 function renderSCNetwork() {
   const area = document.getElementById('sc-network');
   if (!area || !_scMineral) return;
@@ -10031,124 +10141,112 @@ function renderSCNetwork() {
   let companies = MINERAL_COMPANIES[_scMineral] || [];
   if (_scCompanyFilter) companies = companies.filter(co => co.name.toLowerCase().includes(_scCompanyFilter.toLowerCase()));
 
-  // Build columns. Column 0 is the mineral itself; columns 1..N are stages (countries);
-  // the last column is companies.
-  const columns = [{ type:'mineral', nodes:[{ key:'m', share:100 }] }];
-  stages.forEach(stage => {
+  // One branch per stage (leaves = that stage's seller countries), plus a final
+  // branch for companies.
+  const branches = stages.map(stage => {
     const data = getStageData(_scMineral, stage.id);
-    columns.push({ type:'country', stage, real:data.real, nodes: data.sellers.map(s=>({ key:'c'+stage.id+s.id, id:s.id, share:Math.max(s.share,2) })) });
+    return { type:'country', stage, real:data.real, leaves: data.sellers.map(s=>({ id:s.id, share:Math.max(s.share,2) })) };
   });
-  columns.push({ type:'company', nodes: companies.length
-    ? companies.map((co,i)=>({ key:'co'+i, company:co, share: 100/companies.length }))
-    : [{ key:'co-none', company:null, share:100 }] });
+  branches.push({ type:'company', leaves: companies.map((co,i)=>({ key:'co'+i, company:co })) });
 
   area.innerHTML = '';
-  const colW = 175, nodeW = 150, mineralW = 60;
-  const W = Math.max(area.clientWidth || 900, 40 + mineralW + (columns.length-1)*colW + nodeW);
-  const H = 260, PAD = 22;
-  const svg = d3.select(area).append('svg').attr('width', W).attr('height', H + 16);
+  const leafRowH = 25, hubRowH = 22, branchGap = 12, PAD = 14;
+  const leafW = 168, hubW = 178, gap = 46, mineralR = 30;
 
-  // Position nodes: x per column (left to right), y stacked by share within the column.
-  let colX = 20;
-  columns.forEach((col, ci) => {
-    const total = col.nodes.reduce((s,n)=>s+n.share,0) || 1;
-    const w = ci===0 ? mineralW : nodeW;
-    let y = PAD;
-    col.nodes.forEach(n => {
-      const h = ci===0 ? H-2*PAD : Math.max(20, (H-2*PAD) * (n.share/total) - 5);
-      n.x = colX; n.y = y; n.h = h; n.w = w;
-      y += h + 5;
-    });
-    colX += w + (ci===0 ? 40 : colW - nodeW + 40);
+  const branchH = branches.map(b => Math.max(hubRowH+6, (b.leaves.length||1) * leafRowH));
+  const H = Math.max(240, branchH.reduce((s,h)=>s+h,0) + branchGap*(branches.length-1) + PAD*2);
+
+  const cx = PAD + mineralR, cy = H/2;
+  const hubX = cx + mineralR + gap;
+  const leafX = hubX + hubW + gap;
+  const W = Math.max(area.clientWidth || 760, leafX + leafW + PAD);
+  const svg = d3.select(area).append('svg').attr('width', W).attr('height', H);
+
+  // Position each branch's band (top to bottom).
+  let y = PAD;
+  branches.forEach((b, bi) => {
+    b.bandY = y; b.bandH = branchH[bi]; b.hubY = y + b.bandH/2;
+    y += b.bandH + branchGap;
   });
 
-  // Column headers — clickable for country-stage columns, opening the horizontal
-  // (per-stage, cross-country) detail view below the diagram.
-  columns.forEach((col, ci) => {
-    if (ci===0) return;
-    const label = col.type==='company' ? 'Companies' : col.stage.label;
-    const hdr = svg.append('text').attr('x', col.nodes[0].x + (col.type==='mineral'?mineralW:nodeW)/2).attr('y', PAD-8)
-      .attr('text-anchor','middle').attr('font-size',10)
-      .attr('fill', col.type==='country' && _scStageDetail===col.stage.id ? 'var(--accent)' : 'var(--text3)')
-      .attr('font-weight', col.type==='country' && _scStageDetail===col.stage.id ? 700 : 400)
-      .text(col.type==='country' ? label+' ▾' : label);
-    if (col.type==='country') {
-      hdr.style('cursor','pointer').on('click', () => toggleStageDetail(col.stage.id));
-      hdr.append('title').text('Click for country-by-country detail: companies, ports, buyers');
-    }
-    if (col.type==='country' && !col.real) {
-      svg.append('text').attr('x', col.nodes[0].x + nodeW/2).attr('y', H+12).attr('text-anchor','middle')
-        .attr('font-size',8).attr('fill','var(--text3)').text('curated estimate');
-    }
-  });
-
-  // Links between every adjacent column pair (proportional "independent flow" split —
-  // illustrative of chain structure, not a claim of precise country→company routing).
-  for (let ci=0; ci<columns.length-1; ci++) {
-    const left = columns[ci].nodes, right = columns[ci+1].nodes;
-    const totalRight = right.reduce((s,n)=>s+n.share,0) || 1;
-    const srcOffset = {}, tgtOffset = {};
-    left.forEach(n=>srcOffset[n.key]=0); right.forEach(n=>tgtOffset[n.key]=0);
-    left.forEach(ln => {
-      right.forEach(rn => {
-        const frac = rn.share/totalRight;
-        const sw = frac*ln.h, tw = frac*ln.h;
-        const sx = ln.x+ln.w, sy = ln.y+srcOffset[ln.key];
-        const tx = rn.x, ty = rn.y+tgtOffset[rn.key];
-        srcOffset[ln.key]+=sw; tgtOffset[rn.key]+=tw;
-        const mx = (sx+tx)/2;
-        const d = `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}
-                   L${tx},${ty+tw} C${mx},${ty+tw} ${mx},${sy+sw} ${sx},${sy+sw} Z`;
-        svg.append('path').attr('d',d).attr('fill','var(--accent)').attr('fill-opacity',0.12)
-          .attr('stroke','var(--accent)').attr('stroke-width',0.4).attr('stroke-opacity',0.25);
-      });
-    });
-  }
-
-  // Mineral node (circle).
-  const mn = columns[0].nodes[0];
+  // Mineral node (center).
   const mNode = svg.append('g');
-  mNode.append('circle').attr('cx',mn.x+mineralW/2).attr('cy',H/2).attr('r',28).attr('fill','var(--accent3)').attr('fill-opacity',0.25).attr('stroke','var(--accent3)').attr('stroke-width',1.5);
-  mNode.append('text').attr('x',mn.x+mineralW/2).attr('y',H/2-2).attr('text-anchor','middle').attr('font-size',16).text(m.icon);
-  mNode.append('text').attr('x',mn.x+mineralW/2).attr('y',H/2+13).attr('text-anchor','middle').attr('fill','var(--text)').attr('font-size',9).attr('font-weight',700).text(m.name.length>12?m.name.slice(0,10)+'…':m.name);
+  mNode.append('circle').attr('cx',cx).attr('cy',cy).attr('r',mineralR).attr('fill','var(--accent3)').attr('fill-opacity',0.25).attr('stroke','var(--accent3)').attr('stroke-width',1.5);
+  mNode.append('text').attr('x',cx).attr('y',cy-3).attr('text-anchor','middle').attr('font-size',16).text(m.icon);
+  mNode.append('text').attr('x',cx).attr('y',cy+13).attr('text-anchor','middle').attr('fill','var(--text)').attr('font-size',9).attr('font-weight',700).text(m.name.length>12?m.name.slice(0,10)+'…':m.name);
 
-  // Country columns.
-  for (let ci=1; ci<columns.length-1; ci++) {
-    columns[ci].nodes.forEach(n => {
-      const c = COUNTRIES.find(x=>x.id===n.id);
-      if (!c) return;
-      const selected = _scCountry===n.id;
-      const g = svg.append('g').style('cursor','pointer')
-        .on('click', () => selectSCCountry(n.id, columns[ci].stage.id))
-        .on('mouseenter', function(){ d3.select(this).select('rect').attr('stroke-width',2); })
-        .on('mouseleave', function(){ d3.select(this).select('rect').attr('stroke-width', selected?2:1); });
-      g.append('rect').attr('x',n.x).attr('y',n.y).attr('width',n.w).attr('height',n.h).attr('rx',5)
-        .attr('fill', selected ? 'rgba(59,130,246,0.25)' : 'var(--surface2)')
-        .attr('stroke', selected ? 'var(--accent)' : 'var(--border)').attr('stroke-width', selected?2:1);
-      if (n.h>13) g.append('text').attr('x',n.x+6).attr('y',n.y+n.h/2+4).attr('font-size',10).attr('fill','var(--text)')
-        .text(`${c.flag} ${c.name.length>14?c.name.slice(0,12)+'…':c.name} · ${n.share}%`);
-      g.append('title').text(`${c.name} — ${n.share}% (${columns[ci].stage.label})`);
-    });
-  }
+  branches.forEach(b => {
+    // Center → hub spoke.
+    const mx1 = (cx+mineralR+hubX)/2;
+    svg.append('path').attr('d', `M${cx+mineralR},${cy} C${mx1},${cy} ${mx1},${b.hubY} ${hubX},${b.hubY}`)
+      .attr('fill','none').attr('stroke','var(--text3)').attr('stroke-width',1.2).attr('stroke-opacity',0.4);
 
-  // Company column.
-  const compCol = columns[columns.length-1];
-  compCol.nodes.forEach(n => {
-    if (!n.company) {
-      svg.append('text').attr('x',n.x+nodeW/2).attr('y',n.y+n.h/2).attr('text-anchor','middle').attr('font-size',10).attr('fill','var(--text3)').text('No matches');
+    // Hub node (aggregate — e.g. "Refined copper (cathode) · 6").
+    const label = b.type==='company' ? 'Companies' : b.stage.label;
+    const hubG = svg.append('g').style('cursor', b.type==='country' ? 'pointer' : 'default');
+    if (b.type==='country') hubG.on('click', () => toggleStageDetail(b.stage.id))
+      .append('title').text('Click for country-by-country detail: companies, ports, buyers');
+    const hubActive = b.type==='country' && _scStageDetail===b.stage.id;
+    hubG.append('rect').attr('x',hubX).attr('y',b.hubY-hubRowH/2).attr('width',hubW).attr('height',hubRowH).attr('rx',hubRowH/2)
+      .attr('fill', hubActive ? 'rgba(59,130,246,0.2)' : 'rgba(59,130,246,0.07)')
+      .attr('stroke', hubActive ? 'var(--accent)' : 'rgba(59,130,246,0.35)').attr('stroke-width',1.2);
+    const hubLabel = `${label} · ${b.leaves.length}${b.type==='country'?' ▾':''}`;
+    hubG.append('text').attr('x',hubX+hubW/2).attr('y',b.hubY+3.5).attr('text-anchor','middle').attr('font-size',10).attr('font-weight',600)
+      .attr('fill', hubActive ? 'var(--accent)' : 'var(--text)')
+      .text(hubLabel.length>26 ? hubLabel.slice(0,24)+'…' : hubLabel);
+    if (b.type==='country' && !b.real) {
+      svg.append('text').attr('x',hubX+hubW/2).attr('y',b.hubY+hubRowH/2+11).attr('text-anchor','middle').attr('font-size',7.5).attr('fill','var(--text3)').text('curated estimate');
+    }
+
+    // Hub → leaf spokes + leaf boxes, stacked within this branch's own band only.
+    if (!b.leaves.length) {
+      svg.append('text').attr('x',leafX+leafW/2).attr('y',b.hubY).attr('text-anchor','middle').attr('font-size',10).attr('fill','var(--text3)').text('No matches');
       return;
     }
-    const selected = _scCompany===n.company.name;
-    const g = svg.append('g').style('cursor','pointer')
-      .on('click', () => selectSCCompany(n.company.name))
-      .on('mouseenter', function(){ d3.select(this).select('rect').attr('stroke-width',2); })
-      .on('mouseleave', function(){ d3.select(this).select('rect').attr('stroke-width', selected?2:1); });
-    g.append('rect').attr('x',n.x).attr('y',n.y).attr('width',n.w).attr('height',n.h).attr('rx',5)
-      .attr('fill', selected ? 'rgba(139,92,246,0.25)' : 'var(--surface2)')
-      .attr('stroke', selected ? 'var(--accent3)' : 'var(--border)').attr('stroke-width', selected?2:1);
-    if (n.h>13) g.append('text').attr('x',n.x+6).attr('y',n.y+n.h/2+4).attr('font-size',10).attr('fill','var(--text)')
-      .text(n.company.name.length>16?n.company.name.slice(0,14)+'…':n.company.name);
-    g.append('title').text(`${n.company.name} — HQ ${n.company.hq} (curated, not a market-share figure)`);
+    // Fixed row height per leaf (not proportional to share) — a proportional split
+    // combined with the minimum-height clamp for small shares could sum to more than
+    // the band's own height and overflow into the next branch below it. Share is
+    // still shown as text in the box; it just no longer drives box height.
+    let ly = b.bandY;
+    b.leaves.forEach(leaf => {
+      const lh = leafRowH - 5;
+      const midx = (hubX+hubW+leafX)/2, cyMid = ly+lh/2;
+      svg.append('path').attr('d', `M${hubX+hubW},${b.hubY} C${midx},${b.hubY} ${midx},${cyMid} ${leafX},${cyMid}`)
+        .attr('fill','none').attr('stroke','var(--text3)').attr('stroke-width',1).attr('stroke-opacity',0.3);
+
+      if (b.type==='country') {
+        const c = COUNTRIES.find(x=>x.id===leaf.id);
+        if (c) {
+          const selected = _scCountry===leaf.id;
+          const g = svg.append('g').style('cursor','pointer')
+            .on('click', () => selectSCCountry(leaf.id, b.stage.id))
+            .on('mouseenter', function(){ d3.select(this).select('rect').attr('stroke-width',2); })
+            .on('mouseleave', function(){ d3.select(this).select('rect').attr('stroke-width', selected?2:1); });
+          g.append('rect').attr('x',leafX).attr('y',ly).attr('width',leafW).attr('height',lh).attr('rx',5)
+            .attr('fill', selected ? 'rgba(59,130,246,0.25)' : 'var(--surface2)')
+            .attr('stroke', selected ? 'var(--accent)' : 'var(--border)').attr('stroke-width', selected?2:1);
+          if (lh>13) g.append('text').attr('x',leafX+6).attr('y',ly+lh/2+4).attr('font-size',10).attr('fill','var(--text)')
+            .text(`${c.flag} ${c.name.length>14?c.name.slice(0,12)+'…':c.name} · ${leaf.share}%`);
+          g.append('title').text(`${c.name} — ${leaf.share}% (${b.stage.label})`);
+        }
+      } else {
+        const co = leaf.company;
+        const hqC = resolveCompanyHqCountry(co.hq);
+        const selected = _scCompany===co.name;
+        const g = svg.append('g').style('cursor','pointer')
+          .on('click', () => selectSCCompany(co.name))
+          .on('mouseenter', function(){ d3.select(this).select('rect').attr('stroke-width',2); })
+          .on('mouseleave', function(){ d3.select(this).select('rect').attr('stroke-width', selected?2:1); });
+        g.append('rect').attr('x',leafX).attr('y',ly).attr('width',leafW).attr('height',lh).attr('rx',5)
+          .attr('fill', selected ? 'rgba(139,92,246,0.25)' : 'var(--surface2)')
+          .attr('stroke', selected ? 'var(--accent3)' : 'var(--border)').attr('stroke-width', selected?2:1);
+        const nameLabel = (hqC?hqC.flag+' ':'')+co.name;
+        if (lh>13) g.append('text').attr('x',leafX+6).attr('y',ly+lh/2+4).attr('font-size',10).attr('fill','var(--text)')
+          .text(nameLabel.length>18?nameLabel.slice(0,16)+'…':nameLabel);
+        g.append('title').text(`${co.name} — HQ ${co.hq} (curated, not a market-share figure)`);
+      }
+      ly += leafRowH;
+    });
   });
 }
 
@@ -10177,6 +10275,9 @@ function selectSCCompany(name) {
   const sel = document.getElementById('sc-filter-country'); if (sel) sel.value = _scCountryFilter;
   renderSCNetwork();
   renderSCDetail();
+  // The network diagram above can be tall, pushing the detail card below the
+  // fold — scroll it into view so clicking a company doesn't look like a no-op.
+  document.getElementById('sc-detail')?.scrollIntoView({ behavior:'smooth', block:'nearest' });
 }
 
 // ── Horizontal (per-stage, cross-country) detail view ──────────────────────
@@ -10208,12 +10309,12 @@ function renderStageDetail() {
     if (_scCompanyFilter) companies = companies.filter(co => co.name.toLowerCase().includes(_scCompanyFilter.toLowerCase()));
     const ports = (MINERAL_PORTS[_scMineral] && MINERAL_PORTS[_scMineral][c.id]) || [];
     return `
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
           <span style="font-size:16px">${c.flag}</span><b style="font-size:13px">${c.name}</b>
           <span style="color:var(--text3);font-size:11px">${data.real?'$'+(s.value/1e6).toFixed(1)+'M':(s.share+'%')} · ${stage.label}</span>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
           <div>
             <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">🏭 Companies here</div>
             ${companies.length ? companies.map(co=>`<div style="font-size:11.5px;padding:2px 0">${co.name}</div>`).join('') : '<div style="color:var(--text3);font-size:11px">None curated for this country</div>'}
@@ -10234,10 +10335,10 @@ function renderStageDetail() {
   }).join('');
 
   box.innerHTML = `
-    <div style="border:1px solid var(--accent);border-radius:10px;padding:12px;background:rgba(59,130,246,0.05)">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <div style="border:1px solid rgba(59,130,246,0.35);border-radius:10px;padding:13px;background:rgba(59,130,246,0.06)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div style="font-size:12px;font-weight:700;color:var(--accent)">🔎 ${stage.label} — country-by-country detail</div>
-        <span onclick="toggleStageDetail('${stage.id}')" style="cursor:pointer;color:var(--text3);font-size:12px">✕ Close</span>
+        <span class="sc-clear-btn" onclick="toggleStageDetail('${stage.id}')" style="cursor:pointer;color:var(--text2);font-size:11px;border:1px solid var(--border);background:var(--surface);border-radius:20px;padding:3px 10px">✕ Close</span>
       </div>
       ${rowsHtml || '<div style="color:var(--text3);font-size:12px">No countries match the current filter.</div>'}
     </div>`;
@@ -10247,24 +10348,27 @@ function renderSCTables() {
   const box = document.getElementById('sc-tables');
   if (!_scMineral) { box.innerHTML=''; return; }
   const data = getStageData(_scMineral, _scStage);
-  const row = (label, val) => {
+  const row = (label, val, i) => {
     const c = COUNTRIES.find(x=>x.id===label.id);
     if (!c) return '';
     const hl = _scCountry===label.id;
-    return `<tr style="${hl?'background:rgba(59,130,246,0.12)':''}"><td style="padding:4px 6px">${c.flag} ${c.name}</td><td style="padding:4px 6px;text-align:right">${val}</td></tr>`;
+    return `<tr class="sc-row-hover" style="${hl?'background:rgba(59,130,246,0.14)':(i%2?'background:rgba(255,255,255,0.02)':'')}">
+      <td style="padding:6px 8px;border-radius:6px 0 0 6px">${c.flag} ${c.name}</td>
+      <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text2);border-radius:0 6px 6px 0">${val}</td>
+    </tr>`;
   };
   box.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
-        <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">📤 Top Sellers ${data.real?`<span style="color:var(--accent2);font-weight:400">· UN Comtrade ${data.year}</span>`:`<span style="color:var(--text3);font-weight:400">· curated estimate</span>`}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="sc-card">
+        <div class="sc-section-label" style="margin-bottom:8px">📤 Top Sellers ${data.real?`<span style="color:var(--accent2);font-weight:400;text-transform:none;letter-spacing:normal">· UN Comtrade ${data.year}</span>`:`<span style="color:var(--text3);font-weight:400;text-transform:none;letter-spacing:normal">· curated estimate</span>`}</div>
         <table style="width:100%;border-collapse:collapse;font-size:11.5px">
-          ${data.sellers.map(s=>row(s, data.real ? '$'+(s.value/1e6).toFixed(1)+'M' : s.share+'%')).join('') || '<tr><td style="color:var(--text3)">No data</td></tr>'}
+          ${data.sellers.map((s,i)=>row(s, data.real ? '$'+(s.value/1e6).toFixed(1)+'M' : s.share+'%', i)).join('') || '<tr><td style="color:var(--text3)">No data</td></tr>'}
         </table>
       </div>
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
-        <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">📥 Top Buyers ${data.real?`<span style="color:var(--accent2);font-weight:400">· UN Comtrade ${data.year}</span>`:''}</div>
+      <div class="sc-card">
+        <div class="sc-section-label" style="margin-bottom:8px">📥 Top Buyers ${data.real?`<span style="color:var(--accent2);font-weight:400;text-transform:none;letter-spacing:normal">· UN Comtrade ${data.year}</span>`:''}</div>
         ${data.buyers && data.buyers.length ? `<table style="width:100%;border-collapse:collapse;font-size:11.5px">
-          ${data.buyers.map(b=>row(b, '$'+(b.value/1e6).toFixed(1)+'M')).join('')}
+          ${data.buyers.map((b,i)=>row(b, '$'+(b.value/1e6).toFixed(1)+'M', i)).join('')}
         </table>` : '<div style="color:var(--text3);font-size:11px">Live buyer data pending — refreshed daily via UN Comtrade once available for this stage.</div>'}
       </div>
     </div>
@@ -10283,16 +10387,17 @@ function renderSCDetail() {
   let companies = MINERAL_COMPANIES[_scMineral] || [];
   if (_scCompanyFilter) companies = companies.filter(co => co.name.toLowerCase().includes(_scCompanyFilter.toLowerCase()));
   const ports = (c && MINERAL_PORTS[_scMineral] && MINERAL_PORTS[_scMineral][c.id]) || [];
+  const selectedCo = _scCompany ? (MINERAL_COMPANIES[_scMineral]||[]).find(co=>co.name===_scCompany) : null;
   box.innerHTML = `
-    ${_scCompany ? `<div style="font-size:11px;color:var(--accent3);margin-bottom:8px">🏢 Selected company: <b>${_scCompany}</b>${c?` — HQ ${c.flag} ${c.name}`:''}</div>` : ''}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
-        <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:8px">🏭 Major Companies${c?` · ${c.flag} ${c.name}`:''}</div>
-        ${companies.length ? companies.map(co=>`<div onclick="selectSCCompany('${co.name.replace(/'/g,"\\'")}')" style="cursor:pointer;font-size:12px;padding:4px 6px;border-radius:6px;margin-bottom:2px;background:${_scCompany===co.name?'rgba(139,92,246,0.18)':'transparent'}"><b>${co.name}</b><div style="color:var(--text3);font-size:10px">${co.hq}</div></div>`).join('') : '<div style="color:var(--text3);font-size:11px">No matching curated entries</div>'}
+    ${selectedCo ? `<div style="margin-bottom:14px">${renderCompanyAnalyticsCard(selectedCo)}</div>` : ''}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="sc-card">
+        <div class="sc-section-label">🏭 Major Companies${c?` · ${c.flag} ${c.name}`:''}</div>
+        ${companies.length ? companies.map(co=>`<div class="sc-company-row" onclick="selectSCCompany('${co.name.replace(/'/g,"\\'")}')" style="cursor:pointer;font-size:12px;padding:6px 8px;border-radius:6px;margin-bottom:3px;background:${_scCompany===co.name?'rgba(139,92,246,0.18)':'transparent'}"><b>${co.name}</b><div style="color:var(--text3);font-size:10px;margin-top:1px">${co.hq}</div></div>`).join('') : '<div style="color:var(--text3);font-size:11px">No matching curated entries</div>'}
       </div>
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
-        <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:8px">⚓ Major Export Ports${c?` · ${c.flag} ${c.name}`:''}</div>
-        ${ports.length ? ports.map(p=>`<div style="font-size:12px;padding:4px 6px">⚓ ${p.name}</div>`).join('') : `<div style="color:var(--text3);font-size:11px">${c?'No curated entries for this country':'Select a country to see its export ports'}</div>`}
+      <div class="sc-card">
+        <div class="sc-section-label">⚓ Major Export Ports${c?` · ${c.flag} ${c.name}`:''}</div>
+        ${ports.length ? ports.map(p=>`<div style="font-size:12px;padding:5px 8px;border-radius:6px" class="sc-row-hover">⚓ ${p.name}</div>`).join('') : `<div style="color:var(--text3);font-size:11px">${c?'No curated entries for this country':'Select a country to see its export ports'}</div>`}
       </div>
     </div>
   `;
@@ -10408,6 +10513,11 @@ function exitSCMapMode() {
 // trade data is still shown everywhere else (tables, diagram); this score specifically
 // needs a stable denominator, so it uses the full known-producer distribution.
 // Same formula regulators use for market concentration, applied to single-source risk.
+// Consistent one-line "why am I here" header, reused across every tab.
+function scTabSubtitle(text) {
+  return `<div style="font-size:11px;color:var(--text3);margin-bottom:12px">${text}</div>`;
+}
+
 function computeRiskScore(mineralId, stageId) {
   const m = MINERAL_MAP[mineralId];
   const hhi = m.producers.reduce((s,p) => s + Math.pow((p.share||0)/100, 2), 0);
@@ -10426,71 +10536,10 @@ function allMineralRiskEntries() {
   return MINERALS.map(m => ({ mineral:m, risk: computeRiskScore(m.id, (m.stages||[])[0]?.id) }));
 }
 
-function renderSCRisk() {
-  const box = document.getElementById('sc-tab-risk');
-  const entries = allMineralRiskEntries().sort((a,b) => b.risk.hhi - a.risk.hhi);
-  const counts = { Critical:0, High:0, Medium:0, Low:0 };
-  entries.forEach(e => counts[e.risk.level]++);
-  const byCategory = {};
-  entries.forEach(e => {
-    const cat = e.mineral.category;
-    if (!byCategory[cat]) byCategory[cat] = [];
-    byCategory[cat].push(e.risk.hhi);
-  });
-  const catRows = Object.entries(byCategory).map(([cat, hhis]) => ({
-    cat, avg: hhis.reduce((s,x)=>s+x,0)/hhis.length, n: hhis.length,
-  })).sort((a,b)=>b.avg-a.avg);
-
-  const alerts = entries.filter(e => e.risk.level === 'High' || e.risk.level === 'Critical');
-
-  function insight(e) {
-    const cps = (e.mineral.chokepoints||[]).map(id=>CHOKEPOINTS.find(c=>c.id===id)?.name).filter(Boolean);
-    const cpText = cps.length ? `, typically shipped via ${cps.slice(0,2).join(' or ')}` : '';
-    return `${e.risk.topCountry.flag} ${e.risk.topCountry.name} alone supplies ~${e.risk.topShare}% of global ${e.mineral.name.toLowerCase()}${cpText} — a disruption there has no quick substitute.`;
-  }
-
-  box.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
-      ${['Critical','High','Medium','Low'].map(lvl => `
-        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center">
-          <div style="font-size:20px;font-weight:700;color:${lvl==='Critical'?'var(--red)':lvl==='High'?'#f97316':lvl==='Medium'?'var(--yellow)':'var(--green)'}">${counts[lvl]}</div>
-          <div style="font-size:10px;color:var(--text3)">${lvl}</div>
-        </div>`).join('')}
-    </div>
-    <div style="margin-bottom:14px">
-      <div style="font-size:13px;font-weight:700;margin-bottom:6px">🚨 Why these matter (High/Critical)</div>
-      ${alerts.length ? alerts.map(e => `
-        <div style="display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border:1px solid ${e.risk.color};border-left-width:4px;border-radius:8px;padding:8px 12px;margin-bottom:6px">
-          <span style="font-size:16px">${e.mineral.icon}</span>
-          <div style="flex:1">
-            <b>${e.mineral.name}</b> <span style="color:var(--text3);font-size:11px">· ${e.mineral.category}${e.risk.hasLiveData?' · confirmed by live UN Comtrade data':''}</span>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">${insight(e)}</div>
-          </div>
-          <div style="text-align:right;flex-shrink:0">
-            <div style="color:${e.risk.color};font-weight:700;font-size:13px">${e.risk.level}</div>
-            <div style="font-size:10px;color:var(--text3)">HHI ${e.risk.hhi.toFixed(2)}</div>
-          </div>
-        </div>`).join('') : '<div style="color:var(--text3);font-size:12px">No High/Critical concentration risks flagged.</div>'}
-    </div>
-    <div style="font-size:13px;font-weight:700;margin-bottom:6px">Risk by category</div>
-    <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
-      ${catRows.map(r => `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:11px">
-        ${r.cat} <span style="color:var(--text3)">(${r.n})</span> — avg HHI <b>${r.avg.toFixed(2)}</b></div>`).join('')}
-    </div>
-    <div style="font-size:13px;font-weight:700;margin-bottom:6px">All minerals by concentration risk</div>
-    <table style="width:100%;border-collapse:collapse;font-size:11.5px">
-      <tr style="color:var(--text3);text-align:left"><th style="padding:4px">Mineral</th><th style="padding:4px">Category</th><th style="padding:4px">Top Source</th><th style="padding:4px">HHI</th><th style="padding:4px">Risk</th><th style="padding:4px">Chokepoints</th></tr>
-      ${entries.map(e => `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="jumpToMineralFromRisk('${e.mineral.id}')">
-        <td style="padding:4px">${e.mineral.icon} ${e.mineral.name}</td>
-        <td style="padding:4px;color:var(--text3)">${e.mineral.category}</td>
-        <td style="padding:4px">${e.risk.topCountry.flag} ${e.risk.topCountry.name} (${e.risk.topShare}%)</td>
-        <td style="padding:4px">${e.risk.hhi.toFixed(2)}</td>
-        <td style="padding:4px;color:${e.risk.color};font-weight:600">${e.risk.level}</td>
-        <td style="padding:4px;color:var(--text3)">${(e.mineral.chokepoints||[]).map(id=>CHOKEPOINTS.find(c=>c.id===id)?.name).filter(Boolean).join(', ')||'—'}</td>
-      </tr>`).join('')}
-    </table>
-  `;
-}
+// Risk & Alerts used to be its own tab here; it's now the "Critical Minerals
+// Export" map layer instead (see renderMineralsLayer/toggleLayer 'minerals') —
+// shading + hover on the main map, rather than a separate list view. This
+// jump helper is still used by the Compare tab's "→ Explorer" links.
 function jumpToMineralFromRisk(mineralId) { selectSCMineral(mineralId); setSCTab('explorer'); }
 
 // ── Products: convergence view — multiple commodity chains feeding one finished good ──
@@ -10499,8 +10548,8 @@ let _scProduct = null;
 function renderSCProducts() {
   const box = document.getElementById('sc-tab-products');
   box.innerHTML = `
-    <div id="sc-product-chips" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:10px;margin-bottom:8px;border-bottom:1px solid var(--border)"></div>
-    <div style="font-size:10.5px;color:var(--text3);margin-bottom:10px">How multiple commodity chains converge into one finished product — click any input to open its full chain (vertical + horizontal) in Explorer, or click an assembler for its HQ. Bill-of-materials composition is well-documented industry knowledge (curated, not a live API); each input's country data is the same live UN Comtrade feed as Explorer.</div>
+    ${scTabSubtitle('Start here: see how multiple commodity chains converge into one finished product. Click any input to drill into its full chain in Explorer, or an assembler for its HQ.')}
+    <div id="sc-product-chips" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--border)"></div>
     <div id="sc-product-diagram" style="width:100%;overflow-x:auto"></div>
     <div id="sc-product-detail" style="margin-top:14px"></div>
   `;
@@ -10523,70 +10572,236 @@ function selectSCProduct(id) {
   document.getElementById('sc-product-chips').innerHTML = renderProductChips();
   document.getElementById('sc-product-detail').innerHTML = '';
   drawProductDiagram();
+  updateSCContextBar();
 }
 
+// ── Bloomberg-terminal-style hub diagram for Products: the finished product sits
+// in the center, exactly like Bloomberg's supply-chain-map focal company. Each
+// converging input material is its own branch on the LEFT (center → hub node
+// "Bauxite — Aluminum (unwrought) · 3" → that material's own curated companies
+// as leaves — the same "259 Suppliers → individual supplier" pattern) and the
+// finished product's own assemblers are a single branch on the RIGHT (center →
+// "Assembled by · N" hub → individual assembler leaves), mirroring Bloomberg's
+// suppliers-left / customers-right layout. ──
 function drawProductDiagram() {
   const area = document.getElementById('sc-product-diagram');
   const p = PRODUCT_MAP[_scProduct];
   if (!p || !area) return;
   area.innerHTML = '';
-  const inputs = p.inputs, companies = p.assemblers;
-  const rowH = 46, PAD = 20;
-  const H = Math.max(inputs.length, companies.length) * rowH + PAD*2;
-  const leftW = 230, midW = 90, gap = 60, rightW = 210;
-  const W = leftW + gap + midW + gap + rightW;
-  const svg = d3.select(area).append('svg').attr('width', W).attr('height', H);
-  const pcx = leftW + gap + midW/2, pcy = H/2;
+  const inputs = p.inputs, assemblers = p.assemblers;
 
-  // Input nodes (left column) → curved link to the product node.
-  inputs.forEach((inp, i) => {
+  const leftBranches = inputs.map(inp => {
     const m = MINERAL_MAP[inp.mineralId];
     const stage = (m.stages||[]).find(s=>s.id===inp.stageId) || {};
     const data = getStageData(inp.mineralId, inp.stageId);
     const top = data.sellers[0]; const topCountry = top && COUNTRIES.find(c=>c.id===top.id);
-    const y = PAD + i*rowH;
-    const sx = leftW, sy = y + (rowH-8)/2;
-    svg.append('path').attr('d', `M${sx},${sy} C${(sx+pcx)/2},${sy} ${(sx+pcx)/2},${pcy} ${pcx-42},${pcy}`)
-      .attr('fill','none').attr('stroke','var(--accent)').attr('stroke-width',1.5).attr('stroke-opacity',0.35);
-    const g = svg.append('g').style('cursor','pointer')
-      .on('click', () => { selectSCMineral(inp.mineralId); selectSCStage(inp.stageId); setSCTab('explorer'); });
-    g.append('rect').attr('x',0).attr('y',y).attr('width',leftW).attr('height',rowH-8).attr('rx',6)
-      .attr('fill','var(--surface2)').attr('stroke','var(--border)');
-    g.append('text').attr('x',10).attr('y',y+16).attr('font-size',11).attr('fill','var(--text)').attr('font-weight',700)
-      .text(`${m.icon} ${m.name} — ${stage.label||''}`);
-    g.append('text').attr('x',10).attr('y',y+32).attr('font-size',10).attr('fill','var(--text3)')
-      .text(`${inp.role}${topCountry?' · '+topCountry.flag+' '+topCountry.name+' '+(data.real?'(live)':'(curated)'):''}`);
-    g.append('title').text('Click to open full chain in Explorer');
+    const leaves = (MINERAL_COMPANIES[inp.mineralId]||[]).slice(0,4);
+    const hubTitle = `${m.icon} ${m.name} — ${stage.label||''}`;
+    const hubSub = `${inp.role}${topCountry?' · '+topCountry.flag+' '+topCountry.name+' '+(data.real?'(live)':'(curated)'):''}`;
+    return { inp, m, stage, topCountry, real: data.real, leaves, hubTitle, hubSub };
+  });
+
+  const leafRowH = 30, hubRowH = 38, branchGap = 14, PAD = 16;
+  const leftBranchH = leftBranches.map(b => Math.max(hubRowH, (b.leaves.length||1)*leafRowH));
+  const leftTotalH = leftBranchH.reduce((s,h)=>s+h,0) + branchGap*(leftBranches.length-1) + PAD*2;
+  const rightBlockH = Math.max(hubRowH, (assemblers.length||1)*leafRowH);
+  const H = Math.max(leftTotalH, rightBlockH + PAD*2, 220);
+
+  const gap = 46, r = 34;
+  const svg = d3.select(area).append('svg').attr('height', H);
+
+  // Size the hub and leaf boxes to fit their actual rendered text — a fixed
+  // guess-width was truncating real strings like "Silicon & Chips —
+  // Semiconductors & integrated circuits" or "CBG (Cie. des Bauxites de
+  // Guinée)" into unreadable "…" ellipses. Measure the widest text at each
+  // box's real font size/weight and use that (capped, so one outlier can't
+  // blow the diagram out).
+  function textWidth(str, fontSize, weight) {
+    const t = svg.append('text').attr('font-size',fontSize).attr('font-weight',weight||400).attr('opacity',0).text(str);
+    const w = t.node().getComputedTextLength();
+    t.remove();
+    return w;
+  }
+  // Truncate using real measured widths (binary search), not a px-per-char guess —
+  // emoji and punctuation-heavy strings vary too much for a fixed estimate to be
+  // reliably safe, and only rare width-capped outliers should ever hit this at all.
+  function fitTextTrunc(str, fontSize, weight, maxWidth) {
+    if (textWidth(str, fontSize, weight) <= maxWidth) return str;
+    let lo = 0, hi = str.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo+hi)/2);
+      if (textWidth(str.slice(0,mid)+'…', fontSize, weight) <= maxWidth) lo = mid; else hi = mid-1;
+    }
+    return lo>0 ? str.slice(0,lo)+'…' : '…';
+  }
+  const HUB_PAD = 30;
+  const assembledLabel = `⬇ Assembled by · ${assemblers.length}`;
+  let hubW = textWidth(assembledLabel,10.5,600) + 32;
+  leftBranches.forEach(b => {
+    const need = Math.max(textWidth(b.hubTitle,11,700), textWidth(b.hubSub,9.5,400)) + HUB_PAD;
+    hubW = Math.max(hubW, need);
+  });
+  hubW = Math.min(Math.max(hubW, 200), 560);
+
+  const LEAF_PAD = 20;
+  let leafW = 150;
+  leftBranches.forEach(b => b.leaves.forEach(co => { leafW = Math.max(leafW, textWidth(co.name,10,400)+LEAF_PAD); }));
+  assemblers.forEach(co => {
+    const hqC = resolveCompanyHqCountry(co.hq);
+    leafW = Math.max(leafW, textWidth((hqC?hqC.flag+' ':'')+co.name,10,400)+LEAF_PAD);
+  });
+  leafW = Math.min(leafW, 260);
+
+  let x = 0;
+  const leftLeafX = x; x += leafW + gap;
+  const leftHubX = x; x += hubW + gap;
+  const cx = x + r; x += r*2 + gap;
+  const rightHubX = x; x += hubW + gap;
+  const rightLeafX = x; x += leafW;
+  const W = x;
+  const cy = H/2;
+  svg.attr('width', Math.max(area.clientWidth||860, W));
+
+  // Position left branch bands (top to bottom).
+  let y = PAD;
+  leftBranches.forEach((b, bi) => {
+    b.bandY = y; b.bandH = leftBranchH[bi]; b.hubY = y + b.bandH/2;
+    y += b.bandH + branchGap;
   });
 
   // Product node (center).
   const pg = svg.append('g');
-  pg.append('circle').attr('cx',pcx).attr('cy',pcy).attr('r',40).attr('fill','var(--accent3)').attr('fill-opacity',0.25).attr('stroke','var(--accent3)').attr('stroke-width',2);
-  pg.append('text').attr('x',pcx).attr('y',pcy-4).attr('text-anchor','middle').attr('font-size',22).text(p.icon);
-  pg.append('text').attr('x',pcx).attr('y',pcy+16).attr('text-anchor','middle').attr('fill','var(--text)').attr('font-size',11).attr('font-weight',700).text(p.name);
+  pg.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r).attr('fill','var(--accent3)').attr('fill-opacity',0.25).attr('stroke','var(--accent3)').attr('stroke-width',2);
+  pg.append('text').attr('x',cx).attr('y',cy-4).attr('text-anchor','middle').attr('font-size',20).text(p.icon);
+  pg.append('text').attr('x',cx).attr('y',cy+15).attr('text-anchor','middle').attr('fill','var(--text)').attr('font-size',10).attr('font-weight',700).text(p.name);
 
-  // Assembler company nodes (right column) ← curved link from the product node.
-  const rightX = leftW + gap + midW + gap;
-  companies.forEach((co, i) => {
-    const y = PAD + i*rowH;
+  // Left branches: center → material hub → that material's own chain companies.
+  leftBranches.forEach(b => {
+    const mx1 = (cx-r+leftHubX+hubW)/2;
+    svg.append('path').attr('d', `M${cx-r},${cy} C${mx1},${cy} ${mx1},${b.hubY} ${leftHubX+hubW},${b.hubY}`)
+      .attr('fill','none').attr('stroke','var(--text3)').attr('stroke-width',1.2).attr('stroke-opacity',0.4);
+
+    const hubG = svg.append('g').style('cursor','pointer')
+      .on('click', () => { selectSCMineral(b.inp.mineralId); selectSCStage(b.inp.stageId); setSCTab('explorer'); });
+    hubG.append('rect').attr('x',leftHubX).attr('y',b.hubY-hubRowH/2).attr('width',hubW).attr('height',hubRowH).attr('rx',9)
+      .attr('fill','rgba(139,92,246,0.07)').attr('stroke','rgba(139,92,246,0.35)').attr('stroke-width',1.2);
+    hubG.append('rect').attr('x',leftHubX).attr('y',b.hubY-hubRowH/2).attr('width',4).attr('height',hubRowH).attr('rx',2)
+      .attr('fill','var(--accent3)').attr('fill-opacity',0.6);
+    // Box is already sized (above) to fit these strings at their real font sizes,
+    // so this only kicks in for the rare outlier that hit the width cap.
+    const hubInnerW = hubW - HUB_PAD;
+    hubG.append('text').attr('x',leftHubX+14).attr('y',b.hubY-6).attr('font-size',11).attr('font-weight',700).attr('fill','var(--text)')
+      .text(fitTextTrunc(b.hubTitle, 11, 700, hubInnerW));
+    hubG.append('text').attr('x',leftHubX+14).attr('y',b.hubY+10).attr('font-size',9.5).attr('fill','var(--text3)')
+      .text(fitTextTrunc(b.hubSub, 9.5, 400, hubInnerW));
+    hubG.append('title').text(`${b.hubTitle} — ${b.hubSub}\nClick to open full chain in Explorer`);
+
+    if (!b.leaves.length) return;
+    let ly = b.bandY;
+    b.leaves.forEach(co => {
+      const lh = leafRowH - 4;
+      const midx = (leftLeafX+leafW+leftHubX)/2, lcy = ly+lh/2;
+      svg.append('path').attr('d', `M${leftHubX},${b.hubY} C${midx},${b.hubY} ${midx},${lcy} ${leftLeafX+leafW},${lcy}`)
+        .attr('fill','none').attr('stroke','var(--text3)').attr('stroke-width',1).attr('stroke-opacity',0.3);
+      const g = svg.append('g').style('cursor','pointer').on('click', () => selectProductAssembler(co));
+      g.append('rect').attr('x',leftLeafX).attr('y',ly).attr('width',leafW).attr('height',lh).attr('rx',5)
+        .attr('fill','var(--surface2)').attr('stroke','var(--border)');
+      g.append('text').attr('x',leftLeafX+leafW/2).attr('y',ly+lh/2+3.5).attr('text-anchor','middle').attr('font-size',10).attr('fill','var(--text)')
+        .text(fitTextTrunc(co.name, 10, 400, leafW-LEAF_PAD));
+      g.append('title').text(`${co.name} — HQ ${co.hq}`);
+      ly += leafRowH;
+    });
+  });
+
+  // Right branch: center → "Assembled by" hub → individual assembler companies.
+  const rightHubY = cy;
+  const mx2 = (cx+r+rightHubX)/2;
+  svg.append('path').attr('d', `M${cx+r},${cy} C${mx2},${cy} ${mx2},${rightHubY} ${rightHubX},${rightHubY}`)
+    .attr('fill','none').attr('stroke','var(--text3)').attr('stroke-width',1.2).attr('stroke-opacity',0.4);
+  svg.append('rect').attr('x',rightHubX).attr('y',rightHubY-hubRowH/2).attr('width',hubW).attr('height',hubRowH).attr('rx',hubRowH/2)
+    .attr('fill','rgba(139,92,246,0.07)').attr('stroke','rgba(139,92,246,0.35)').attr('stroke-width',1.2);
+  svg.append('text').attr('x',rightHubX+hubW/2).attr('y',rightHubY+4).attr('text-anchor','middle').attr('font-size',10.5).attr('font-weight',600).attr('fill','var(--text)')
+    .text(`⬇ Assembled by · ${assemblers.length}`);
+
+  let ry = cy - rightBlockH/2 + (rightBlockH - assemblers.length*leafRowH)/2;
+  assemblers.forEach(co => {
     const hqC = resolveCompanyHqCountry(co.hq);
-    const tx = rightX, ty = y + (rowH-8)/2;
-    svg.append('path').attr('d', `M${pcx+42},${pcy} C${(pcx+tx)/2},${pcy} ${(pcx+tx)/2},${ty} ${tx},${ty}`)
-      .attr('fill','none').attr('stroke','var(--accent3)').attr('stroke-width',1.5).attr('stroke-opacity',0.35);
+    const lh = leafRowH - 4, lcy = ry+lh/2;
+    const midx = (rightHubX+hubW+rightLeafX)/2;
+    svg.append('path').attr('d', `M${rightHubX+hubW},${rightHubY} C${midx},${rightHubY} ${midx},${lcy} ${rightLeafX},${lcy}`)
+      .attr('fill','none').attr('stroke','var(--text3)').attr('stroke-width',1).attr('stroke-opacity',0.3);
     const g = svg.append('g').style('cursor','pointer').on('click', () => selectProductAssembler(co));
-    g.append('rect').attr('x',rightX).attr('y',y).attr('width',rightW).attr('height',rowH-8).attr('rx',6)
+    g.append('rect').attr('x',rightLeafX).attr('y',ry).attr('width',leafW).attr('height',lh).attr('rx',5)
       .attr('fill','var(--surface2)').attr('stroke','var(--border)');
-    g.append('text').attr('x',rightX+10).attr('y',y+16).attr('font-size',11).attr('fill','var(--text)').attr('font-weight',700).text(co.name);
-    g.append('text').attr('x',rightX+10).attr('y',y+32).attr('font-size',10).attr('fill','var(--text3)').text((hqC?hqC.flag+' ':'')+co.hq);
+    const rLabel = (hqC?hqC.flag+' ':'')+co.name;
+    g.append('text').attr('x',rightLeafX+leafW/2).attr('y',ry+lh/2+3.5).attr('text-anchor','middle').attr('font-size',10).attr('fill','var(--text)')
+      .text(fitTextTrunc(rLabel, 10, 400, leafW-LEAF_PAD));
+    g.append('title').text(`${co.name} — HQ ${co.hq}`);
+    ry += leafRowH;
   });
 }
+// Which commodity chains (as a producer/supplier) and which finished products (as
+// an assembler) a given company name shows up in, across the whole curated dataset —
+// this is what makes the company card "analytics" rather than a static HQ label: a
+// company appearing in multiple chains/products is more exposed, and each entry is a
+// real jump-off point back into Explorer or Products.
+function companyFootprint(name) {
+  const mineralRoles = MINERALS.filter(m => (MINERAL_COMPANIES[m.id]||[]).some(c => c.name === name));
+  const productRoles = PRODUCTS.filter(p => (p.assemblers||[]).some(c => c.name === name));
+  return { mineralRoles, productRoles };
+}
+
+function renderCompanyAnalyticsCard(co) {
+  const hqC = resolveCompanyHqCountry(co.hq);
+  const { mineralRoles, productRoles } = companyFootprint(co.name);
+  const conflict = hqC && CONFLICT_INDEX_DATA?.countries?.[hqC.id];
+  const hqExports = hqC ? countryMineralExports(hqC.id) : [];
+  const gnews = q => `https://news.google.com/search?q=${encodeURIComponent(q)}`;
+
+  return `
+    <div style="background:var(--surface2);border:1px solid var(--accent3);border-radius:10px;padding:14px 16px;max-width:420px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+        <span style="font-size:16px">🏢</span>
+        <div style="font-size:13px;font-weight:700;color:var(--accent3)">${co.name}</div>
+      </div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:10px">
+        HQ: ${hqC?hqC.flag+' ':''}${co.hq}${conflict && CONFLICT_LEVEL_COLOR[conflict.level] ? ` · <span style="color:${CONFLICT_LEVEL_COLOR[conflict.level]}">${conflict.level} conflict risk</span>` : ''}
+      </div>
+
+      ${(mineralRoles.length || productRoles.length) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        ${mineralRoles.length ? `<span style="background:rgba(59,130,246,0.12);color:var(--accent);border-radius:20px;padding:3px 10px;font-size:10.5px">⛏️ ${mineralRoles.length} commodity chain${mineralRoles.length>1?'s':''}</span>` : ''}
+        ${productRoles.length ? `<span style="background:rgba(139,92,246,0.12);color:var(--accent3);border-radius:20px;padding:3px 10px;font-size:10.5px">🏭 ${productRoles.length} product${productRoles.length>1?'s':''} assembled</span>` : ''}
+      </div>` : ''}
+
+      ${mineralRoles.length ? `
+        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:5px">Appears in these chains</div>
+        <div style="margin-bottom:10px">
+          ${mineralRoles.map(m => `<div class="sc-row-hover" onclick="selectSCMineral('${m.id}');setSCTab('explorer')" style="cursor:pointer;font-size:11.5px;padding:3px 4px;border-radius:5px;display:flex;justify-content:space-between"><span>${m.icon} ${m.name}</span><span style="color:var(--text3)">→ Explorer</span></div>`).join('')}
+        </div>` : ''}
+
+      ${productRoles.length ? `
+        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:5px">Assembles these products</div>
+        <div style="margin-bottom:10px">
+          ${productRoles.map(p => `<div class="sc-row-hover" onclick="setSCTab('products');selectSCProduct('${p.id}')" style="cursor:pointer;font-size:11.5px;padding:3px 4px;border-radius:5px;display:flex;justify-content:space-between"><span>${p.icon} ${p.name}</span><span style="color:var(--text3)">→ Products</span></div>`).join('')}
+        </div>` : ''}
+
+      ${hqExports.length ? `
+        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:5px">${hqC.flag} ${hqC.name}'s critical mineral exports</div>
+        <div style="margin-bottom:10px">
+          ${hqExports.slice(0,4).map(e => `<div style="font-size:11.5px;padding:2px 4px;display:flex;justify-content:space-between"><span>${e.mineral.icon} ${e.mineral.name}</span><span style="color:var(--text3)">~${e.share}%</span></div>`).join('')}
+        </div>` : ''}
+
+      <a href="${gnews(co.name)}" target="_blank" style="color:var(--accent2);font-size:11px">📰 Google News ↗</a>
+    </div>`;
+}
+
 function selectProductAssembler(co) {
   const box = document.getElementById('sc-product-detail');
-  const hqC = resolveCompanyHqCountry(co.hq);
-  box.innerHTML = `<div style="background:var(--surface2);border:1px solid var(--accent3);border-radius:10px;padding:10px 12px;display:inline-block">
-    <div style="font-size:12px;font-weight:700;color:var(--accent3)">🏢 ${co.name}</div>
-    <div style="font-size:11px;color:var(--text2);margin-top:2px">HQ: ${hqC?hqC.flag+' ':''}${co.hq}</div>
-  </div>`;
+  box.innerHTML = renderCompanyAnalyticsCard(co);
+  // The diagram above this can be tall/wide (dynamically sized to fit real company
+  // names), so the card can render below the fold — scroll it into view so a click
+  // doesn't look like it did nothing.
+  box.scrollIntoView({ behavior:'smooth', block:'nearest' });
 }
 
 // ── Dashboard: user-pinned KPI tiles, persisted in localStorage (no backend) ──
@@ -10615,6 +10830,43 @@ function refreshDashAddStageOptions() {
   stageSel.innerHTML = (m.stages||[]).map(s=>`<option value="${s.id}">${s.label}</option>`).join('');
 }
 
+// Which pinned tile (by index) has its news panel expanded, if any.
+let _scDashNewsTile = null;
+function toggleDashNews(i) { _scDashNewsTile = _scDashNewsTile===i ? null : i; renderSCDashboard(); }
+
+// News isn't a curated/cached dataset here (no news API) — instead we link straight
+// out to a live Google News search for the mineral, its top-source country, and a
+// matching company, plus general country/company news, so a pinned KPI becomes a
+// one-click jumping-off point for whatever's currently happening around it.
+function renderDashNewsPanel(r) {
+  if (!r) return '';
+  const topCountry = r.topCountry;
+  const companies = MINERAL_COMPANIES[r.m.id] || [];
+  const topCo = topCountry ? companies.find(co => resolveCompanyHqCountry(co.hq)?.id === topCountry.id) : null;
+  const co = topCo || companies[0];
+  const gnews = q => `https://news.google.com/search?q=${encodeURIComponent(q)}`;
+  const card = (title, query) => `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+      <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${title}</div>
+      <a href="${gnews(query)}" target="_blank" style="color:var(--accent2);font-size:11.5px">Google News ↗</a>
+    </div>`;
+  return `
+    <div style="background:var(--surface2);border:1px solid var(--accent);border-radius:10px;padding:14px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700;color:var(--accent)">📰 Critical news for this pin</div>
+        <span onclick="toggleDashNews(${r.i})" style="cursor:pointer;color:var(--text3);font-size:12px">✕ Close</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px">
+        ${card(`${r.m.icon} ${r.m.name} supply chain`, r.m.name+' supply chain')}
+        ${topCountry ? card(`${topCountry.flag} ${topCountry.name} — all news`, topCountry.name) : ''}
+        ${topCountry ? card(`${topCountry.flag} ${topCountry.name} — mining/export`, topCountry.name+' '+r.m.name.toLowerCase()+' export') : ''}
+        ${co ? card(`🏢 ${co.name} — all news`, co.name) : ''}
+        ${co ? card(`🏢 ${co.name} — ${r.m.name.toLowerCase()}`, co.name+' '+r.m.name.toLowerCase()) : ''}
+      </div>
+      <div style="font-size:10px;color:var(--text3);margin-top:10px">Live Google News search results, opened in a new tab — not curated or cached, always current.</div>
+    </div>`;
+}
+
 function pinAllHighRisk() {
   const tiles = loadDashboardTiles();
   const existing = new Set(tiles.map(t=>t.mineralId+'|'+t.stageId));
@@ -10631,6 +10883,7 @@ function renderSCDashboard() {
   const box = document.getElementById('sc-tab-dashboard');
   const tiles = loadDashboardTiles();
   box.innerHTML = `
+    ${scTabSubtitle('Finally: pin the chains and risks worth tracking — saved to this browser, so they\'re here next time without re-exploring.')}
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;flex-wrap:wrap">
       <span style="font-size:12px;color:var(--text2)">Pin a KPI:</span>
       <select id="sc-dash-add-mineral" onchange="refreshDashAddStageOptions()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px">
@@ -10641,6 +10894,7 @@ function renderSCDashboard() {
       <button onclick="pinAllHighRisk()" style="background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px">⚠ Pin all High/Critical risk</button>
     </div>
     <div id="sc-dash-tiles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:16px"></div>
+    <div id="sc-dash-news"></div>
     <div id="sc-dash-summary"></div>
     <div id="sc-dash-table"></div>
   `;
@@ -10661,13 +10915,15 @@ function renderSCDashboard() {
     return { i, m, stage, risk, data, top, topCountry };
   }).filter(Boolean);
 
-  grid.innerHTML = rows.map(r => `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px;position:relative">
-      <span onclick="removeDashboardTile(${r.i})" style="position:absolute;top:6px;right:8px;cursor:pointer;color:var(--text3);font-size:13px">✕</span>
+  grid.innerHTML = rows.map(r => `<div onclick="toggleDashNews(${r.i})" style="background:var(--surface2);border:1px solid ${_scDashNewsTile===r.i?'var(--accent)':'var(--border)'};border-radius:10px;padding:12px;position:relative;cursor:pointer">
+      <span onclick="event.stopPropagation();removeDashboardTile(${r.i})" style="position:absolute;top:6px;right:8px;cursor:pointer;color:var(--text3);font-size:13px">✕</span>
       <div style="font-size:12px;color:var(--text3)">${r.m.icon} ${r.m.name} · ${r.stage.label}</div>
       <div style="font-size:20px;font-weight:700;margin:4px 0">${r.topCountry ? r.topCountry.flag+' '+r.topCountry.name : '—'}</div>
       <div style="font-size:11px;color:var(--text2)">Top source · ${r.top?.share ?? '—'}% ${r.data.real?'(live)':'(curated)'}</div>
       <div style="margin-top:6px;font-size:11px;color:${r.risk.color};font-weight:600">Risk: ${r.risk.level} (HHI ${r.risk.hhi.toFixed(2)})</div>
+      <div style="margin-top:8px;font-size:10px;color:var(--accent2)">📰 News ${_scDashNewsTile===r.i?'▲':'▼'}</div>
     </div>`).join('');
+  document.getElementById('sc-dash-news').innerHTML = renderDashNewsPanel(rows.find(r=>r.i===_scDashNewsTile));
 
   // Aggregate summary across pinned items.
   const counts = { Critical:0, High:0, Medium:0, Low:0 };
@@ -10704,6 +10960,7 @@ let _scCompareChart1 = null, _scCompareChart2 = null;
 function renderSCCompare() {
   const box = document.getElementById('sc-tab-compare');
   box.innerHTML = `
+    ${scTabSubtitle('Then contextualize: how does concentration stack up across this chain\'s own stages, and against every other commodity?')}
     <div style="font-size:13px;font-weight:700;margin-bottom:6px">Concentration by stage — ${MINERAL_MAP[_scMineral]?.name || ''}</div>
     <div style="font-size:10.5px;color:var(--text3);margin-bottom:8px">How top-source dependency changes along this chain (curated USGS-based shares — stable across stages even where live trade data is still filling in).</div>
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px;height:220px;margin-bottom:20px">
@@ -10951,11 +11208,10 @@ renderPanel();
       <div style="display:flex;align-items:center;gap:14px">
         <div style="font-size:15px;font-weight:700">🔗 Supply Chain Intelligence Terminal</div>
         <div style="display:flex;gap:2px;background:var(--surface2);border-radius:8px;padding:2px">
-          <button class="sc-toptab" id="sc-toptab-products" onclick="setSCTab('products')" style="border:none;background:var(--accent);color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600">Products</button>
-          <button class="sc-toptab" id="sc-toptab-explorer" onclick="setSCTab('explorer')" style="border:none;background:none;color:var(--text2);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">Explorer</button>
-          <button class="sc-toptab" id="sc-toptab-dashboard" onclick="setSCTab('dashboard')" style="border:none;background:none;color:var(--text2);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">Dashboard</button>
-          <button class="sc-toptab" id="sc-toptab-risk" onclick="setSCTab('risk')" style="border:none;background:none;color:var(--text2);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">Risk &amp; Alerts</button>
-          <button class="sc-toptab" id="sc-toptab-compare" onclick="setSCTab('compare')" style="border:none;background:none;color:var(--text2);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">Compare</button>
+          <button class="sc-toptab" id="sc-toptab-products" onclick="setSCTab('products')" style="border:none;background:var(--accent);color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600">🔀 Products</button>
+          <button class="sc-toptab" id="sc-toptab-explorer" onclick="setSCTab('explorer')" style="border:none;background:none;color:var(--text2);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">🔎 Explorer</button>
+          <button class="sc-toptab" id="sc-toptab-compare" onclick="setSCTab('compare')" style="border:none;background:none;color:var(--text2);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">📊 Compare</button>
+          <button class="sc-toptab" id="sc-toptab-dashboard" onclick="setSCTab('dashboard')" style="border:none;background:none;color:var(--text2);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">📌 Dashboard</button>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:8px">
@@ -10964,30 +11220,63 @@ renderPanel();
         <button onclick="closeSupplyChain()" style="background:none;border:none;color:var(--text2);font-size:22px;cursor:pointer;line-height:1">×</button>
       </div>
     </div>
-    <div style="font-size:10.5px;color:var(--text3);padding:6px 18px;border-bottom:1px solid var(--border);flex-shrink:0">
-      Country-level seller/buyer values: <span style="color:var(--accent2)">UN Comtrade</span> (real, refreshed daily) where available, else curated USGS-based shares. Companies and ports: curated reference data.
+    <div id="sc-context-bar" style="display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:10.5px;color:var(--text3);padding:7px 18px;border-bottom:1px solid var(--border);flex-shrink:0;background:rgba(59,130,246,0.04)">
+      <div id="sc-context-current"></div>
+      <div style="white-space:nowrap">Sources: <span style="color:var(--accent2)">UN Comtrade</span> (live) · curated USGS shares · curated companies/ports</div>
     </div>
     <div style="flex:1;overflow-y:auto;padding:16px 18px">
-      <div id="sc-tab-explorer">
-        <div id="sc-chips" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:10px;margin-bottom:8px;border-bottom:1px solid var(--border)"></div>
-        <div id="sc-stage-tabs" style="display:flex;gap:6px;margin-bottom:10px"></div>
-        <div id="sc-filter-bar" style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap"></div>
-        <div id="sc-network" style="width:100%;overflow-x:auto"></div>
-        <div id="sc-stage-detail" style="margin-top:10px"></div>
-        <div id="sc-tables" style="margin-top:10px"></div>
-        <div id="sc-detail" style="margin-top:10px"></div>
-        <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+      <div id="sc-tab-products" class="sc-tab-panel"></div>
+      <div id="sc-tab-explorer" class="sc-tab-panel" style="display:none">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:16px">Then drill in: trace one commodity's full chain — raw material to finished product, country by country and company by company.</div>
+
+        <div class="sc-section-label">① Select a commodity</div>
+        <div id="sc-chips" style="display:flex;gap:7px;overflow-x:auto;padding-bottom:14px;margin-bottom:18px;border-bottom:1px solid var(--border)"></div>
+
+        <div class="sc-section-label">② Full chain flow <span style="color:var(--text3);font-weight:400;text-transform:none;letter-spacing:normal;font-size:10.5px">— click a stage header for country detail, or a node for its profile</span></div>
+        <div class="sc-card" style="margin-bottom:18px">
+          <div id="sc-network" style="width:100%;overflow-x:auto"></div>
+          <div id="sc-stage-detail" style="margin-top:12px"></div>
+        </div>
+
+        <div class="sc-section-label">③ Filter &amp; inspect a stage</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <div id="sc-stage-tabs" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        </div>
+        <div id="sc-filter-bar" style="display:flex;gap:14px;align-items:center;margin-bottom:14px;flex-wrap:wrap"></div>
+        <div id="sc-tables" style="margin-bottom:14px"></div>
+        <div id="sc-detail"></div>
+
+        <div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end">
           <button onclick="plotSupplyChainOnMap()" style="background:var(--accent);border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500">🗺️ Plot Entire Supply Chain on Map</button>
         </div>
       </div>
-      <div id="sc-tab-products" style="display:none"></div>
-      <div id="sc-tab-dashboard" style="display:none"></div>
-      <div id="sc-tab-risk" style="display:none"></div>
-      <div id="sc-tab-compare" style="display:none"></div>
+      <div id="sc-tab-compare" class="sc-tab-panel" style="display:none"></div>
+      <div id="sc-tab-dashboard" class="sc-tab-panel" style="display:none"></div>
     </div>
   </div>
 </div>
 
+<style>
+  @keyframes scFadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
+  .sc-tab-panel { animation: scFadeIn 0.2s ease; }
+  .sc-toptab:hover { background: rgba(59,130,246,0.12) !important; }
+  #sc-context-current a, #sc-context-current span.sc-jump { cursor: pointer; color: var(--accent); }
+
+  /* Explorer polish */
+  .sc-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .sc-section-label { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text3); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .sc-chip { transition: transform .12s ease, border-color .12s ease, background .12s ease; }
+  .sc-chip:hover { transform: translateY(-1px); border-color: var(--accent) !important; color: var(--text) !important; }
+  .sc-stage-btn { transition: all .12s ease; }
+  .sc-stage-btn:hover { border-color: var(--accent) !important; color: var(--accent) !important; }
+  .sc-select, .sc-input { transition: border-color .12s ease, box-shadow .12s ease; }
+  .sc-select:focus, .sc-input:focus { outline: none; border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+  .sc-clear-btn { transition: all .12s ease; }
+  .sc-clear-btn:hover { background: rgba(239,68,68,0.12) !important; border-color: rgba(239,68,68,0.4) !important; color: #f87171 !important; }
+  .sc-row-hover:hover { background: rgba(59,130,246,0.07) !important; }
+  .sc-company-row:hover { background: rgba(139,92,246,0.12) !important; }
+  #sc-network svg text, #sc-network svg rect { transition: opacity .15s ease; }
+</style>
 <style>
   #drill-overlay.visible, #bubble-overlay.visible, #supplychain-overlay.visible { display:flex !important; }
 </style>
