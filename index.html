@@ -9781,6 +9781,114 @@ const MINERAL_HUB = {
   cement:{name:'Lagos, Nigeria',lng:3.4,lat:6.45},
 };
 
+// ════════════════════════════════════════════════════════════
+// PRODUCTS — finished goods assembled from MULTIPLE converging commodity
+// chains (Bloomberg SPLC-style "who supplies the suppliers" view). Each
+// input is a real, well-documented material used in that product, pointing
+// at a specific (mineralId, stageId) pair already defined above in MINERALS
+// — clicking an input jumps into that commodity's own full vertical +
+// horizontal chain in the Explorer tab. Assembler companies are real, major
+// manufacturers; bill-of-materials composition is well-established industry
+// knowledge, not sourced from a live API (no live BOM/supplier-disclosure
+// data source exists for free).
+// ════════════════════════════════════════════════════════════
+const PRODUCTS = [
+  { id:'smartphone', name:'Smartphone', icon:'📱',
+    inputs:[
+      { mineralId:'silicon',   stageId:'finished', role:'Chips & processors' },
+      { mineralId:'petroleum', stageId:'finished', role:'Plastic housing & components' },
+      { mineralId:'bauxite',   stageId:'metal',    role:'Aluminum frame/chassis' },
+      { mineralId:'copper',    stageId:'finished', role:'Internal wiring' },
+      { mineralId:'cobalt',    stageId:'refined',  role:'Battery cathode' },
+      { mineralId:'lithium',   stageId:'refined',  role:'Battery' },
+      { mineralId:'ree',       stageId:'refined',  role:'Speakers, haptics, magnets' },
+    ],
+    assemblers:[{name:'Foxconn',hq:'Taiwan'},{name:'Apple',hq:'United States'},{name:'Samsung Electronics',hq:'South Korea'},{name:'Pegatron',hq:'Taiwan'},{name:'Xiaomi',hq:'China'}] },
+  { id:'laptop', name:'Laptop', icon:'💻',
+    inputs:[
+      { mineralId:'silicon',   stageId:'finished', role:'Chips & processors' },
+      { mineralId:'petroleum', stageId:'finished', role:'Plastic housing & components' },
+      { mineralId:'bauxite',   stageId:'metal',    role:'Aluminum chassis' },
+      { mineralId:'copper',    stageId:'finished', role:'Internal wiring' },
+      { mineralId:'lithium',   stageId:'refined',  role:'Battery' },
+      { mineralId:'cobalt',    stageId:'refined',  role:'Battery cathode' },
+    ],
+    assemblers:[{name:'Quanta Computer',hq:'Taiwan'},{name:'Compal Electronics',hq:'Taiwan'},{name:'Dell',hq:'United States'},{name:'Lenovo',hq:'China'},{name:'HP',hq:'United States'}] },
+  { id:'ev', name:'Electric Vehicle', icon:'🚗',
+    inputs:[
+      { mineralId:'lithium',   stageId:'refined',  role:'Battery' },
+      { mineralId:'cobalt',    stageId:'refined',  role:'Battery cathode' },
+      { mineralId:'nickel',    stageId:'refined',  role:'Battery cathode' },
+      { mineralId:'graphite',  stageId:'refined',  role:'Battery anode' },
+      { mineralId:'copper',    stageId:'finished', role:'Wiring & motor windings' },
+      { mineralId:'bauxite',   stageId:'metal',    role:'Body panels' },
+      { mineralId:'iron',      stageId:'finished', role:'Steel chassis' },
+      { mineralId:'silicon',   stageId:'finished', role:'Power electronics & chips' },
+      { mineralId:'ree',       stageId:'refined',  role:'Motor magnets' },
+    ],
+    assemblers:[{name:'Tesla',hq:'United States'},{name:'BYD',hq:'China'},{name:'Volkswagen',hq:'Germany'},{name:'CATL',hq:'China'}] },
+  { id:'solar', name:'Solar Panel', icon:'☀️',
+    inputs:[
+      { mineralId:'silicon',   stageId:'refined',  role:'Solar cells (polysilicon)' },
+      { mineralId:'bauxite',   stageId:'metal',    role:'Frame' },
+      { mineralId:'copper',    stageId:'finished', role:'Wiring' },
+    ],
+    assemblers:[{name:'LONGi Green Energy',hq:'China'},{name:'JinkoSolar',hq:'China'},{name:'Trina Solar',hq:'China'},{name:'First Solar',hq:'United States'}] },
+  { id:'turbine', name:'Wind Turbine', icon:'🌬️',
+    inputs:[
+      { mineralId:'ree',      stageId:'refined',  role:'Generator magnets' },
+      { mineralId:'iron',     stageId:'finished', role:'Tower steel' },
+      { mineralId:'copper',   stageId:'finished', role:'Generator wiring' },
+      { mineralId:'zinc',     stageId:'refined',  role:'Galvanizing coating' },
+    ],
+    assemblers:[{name:'Vestas',hq:'Denmark'},{name:'Siemens Gamesa',hq:'Spain'},{name:'GE Renewable Energy',hq:'United States'},{name:'Goldwind',hq:'China'}] },
+  { id:'gasvehicle', name:'Gasoline Vehicle', icon:'🚙',
+    inputs:[
+      { mineralId:'iron',      stageId:'finished', role:'Steel body & chassis' },
+      { mineralId:'bauxite',   stageId:'metal',    role:'Engine block & wheels' },
+      { mineralId:'copper',    stageId:'finished', role:'Wiring harness' },
+      { mineralId:'pgm',       stageId:'refined',  role:'Catalytic converter' },
+      { mineralId:'petroleum', stageId:'finished', role:'Interior & bumper plastics' },
+      { mineralId:'tin',       stageId:'refined',  role:'Electronics solder (ECU)' },
+      { mineralId:'zinc',      stageId:'refined',  role:'Galvanized body coating' },
+    ],
+    assemblers:[{name:'Toyota',hq:'Japan'},{name:'Volkswagen',hq:'Germany'},{name:'General Motors',hq:'United States'},{name:'Stellantis',hq:'Netherlands'},{name:'Ford',hq:'United States'}] },
+  { id:'battery', name:'Rechargeable Battery', icon:'🔋',
+    inputs:[
+      { mineralId:'lithium',  stageId:'refined',  role:'Cathode/electrolyte' },
+      { mineralId:'cobalt',   stageId:'refined',  role:'Cathode' },
+      { mineralId:'nickel',   stageId:'refined',  role:'Cathode' },
+      { mineralId:'graphite', stageId:'refined',  role:'Anode' },
+      { mineralId:'copper',   stageId:'finished', role:'Current collectors' },
+      { mineralId:'bauxite',  stageId:'metal',    role:'Cell casing & foil' },
+    ],
+    assemblers:[{name:'CATL',hq:'China'},{name:'LG Energy Solution',hq:'South Korea'},{name:'Panasonic',hq:'Japan'},{name:'Samsung SDI',hq:'South Korea'},{name:'BYD',hq:'China'}] },
+  { id:'building', name:'Steel Building / Skyscraper', icon:'🏢',
+    inputs:[
+      { mineralId:'iron',    stageId:'finished', role:'Structural steel' },
+      { mineralId:'cement',  stageId:'finished', role:'Concrete foundation & core' },
+      { mineralId:'copper',  stageId:'finished', role:'Electrical wiring' },
+      { mineralId:'zinc',    stageId:'refined',  role:'Galvanizing (corrosion protection)' },
+      { mineralId:'bauxite', stageId:'metal',    role:'Facade & window frames' },
+    ],
+    assemblers:[{name:'China State Construction Engineering',hq:'China'},{name:'Vinci',hq:'France'},{name:'Bechtel',hq:'United States'},{name:'Larsen & Toubro',hq:'India'}] },
+  { id:'nuclear', name:'Nuclear Power Plant', icon:'☢️',
+    inputs:[
+      { mineralId:'uranium', stageId:'refined',  role:'Enriched reactor fuel' },
+      { mineralId:'iron',    stageId:'finished', role:'Reactor vessel & structure' },
+      { mineralId:'cement',  stageId:'finished', role:'Containment structure' },
+      { mineralId:'copper',  stageId:'finished', role:'Electrical systems' },
+    ],
+    assemblers:[{name:'EDF',hq:'France'},{name:'Rosatom',hq:'Russia'},{name:'Westinghouse',hq:'United States'},{name:'China National Nuclear Corp.',hq:'China'},{name:'KEPCO',hq:'South Korea'}] },
+  { id:'can', name:'Food & Beverage Can', icon:'🥫',
+    inputs:[
+      { mineralId:'tin',     stageId:'refined',  role:'Tinplate coating (steel cans)' },
+      { mineralId:'iron',    stageId:'finished', role:'Steel can body' },
+      { mineralId:'bauxite', stageId:'metal',    role:'Aluminum cans' },
+    ],
+    assemblers:[{name:'Crown Holdings',hq:'United States'},{name:'Ball Corporation',hq:'United States'},{name:'Ardagh Group',hq:'Luxembourg'},{name:'Toyo Seikan',hq:'Japan'}] },
+];
+const PRODUCT_MAP = {}; PRODUCTS.forEach(p => PRODUCT_MAP[p.id] = p);
 
 let _scMineral = null, _scStage = null, _scCountry = null, _scCompany = null;
 let _scStageDetail = null;
@@ -9789,7 +9897,7 @@ let _scActiveTopTab = 'explorer';
 
 function setSCTab(name) {
   _scActiveTopTab = name;
-  ['explorer','dashboard','risk','compare'].forEach(t => {
+  ['explorer','products','dashboard','risk','compare'].forEach(t => {
     const on = t === name;
     document.getElementById('sc-tab-'+t).style.display = on ? '' : 'none';
     const btn = document.getElementById('sc-toptab-'+t);
@@ -9797,6 +9905,7 @@ function setSCTab(name) {
     btn.style.color = on ? '#fff' : 'var(--text2)';
     btn.style.fontWeight = on ? 600 : 400;
   });
+  if (name === 'products') renderSCProducts();
   if (name === 'dashboard') renderSCDashboard();
   if (name === 'risk') renderSCRisk();
   if (name === 'compare') renderSCCompare();
@@ -9804,8 +9913,8 @@ function setSCTab(name) {
 
 function openSupplyChain() {
   document.getElementById('supplychain-overlay').classList.add('visible');
-  setSCTab('explorer');
-  if (!_scMineral) selectSCMineral(MINERALS[0].id);
+  if (!_scMineral) selectSCMineral(MINERALS[0].id); // pre-load Explorer's default state so it's ready when switched to
+  setSCTab('products');
 }
 function closeSupplyChain() { document.getElementById('supplychain-overlay').classList.remove('visible'); }
 
@@ -10384,6 +10493,102 @@ function renderSCRisk() {
 }
 function jumpToMineralFromRisk(mineralId) { selectSCMineral(mineralId); setSCTab('explorer'); }
 
+// ── Products: convergence view — multiple commodity chains feeding one finished good ──
+let _scProduct = null;
+
+function renderSCProducts() {
+  const box = document.getElementById('sc-tab-products');
+  box.innerHTML = `
+    <div id="sc-product-chips" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:10px;margin-bottom:8px;border-bottom:1px solid var(--border)"></div>
+    <div style="font-size:10.5px;color:var(--text3);margin-bottom:10px">How multiple commodity chains converge into one finished product — click any input to open its full chain (vertical + horizontal) in Explorer, or click an assembler for its HQ. Bill-of-materials composition is well-documented industry knowledge (curated, not a live API); each input's country data is the same live UN Comtrade feed as Explorer.</div>
+    <div id="sc-product-diagram" style="width:100%;overflow-x:auto"></div>
+    <div id="sc-product-detail" style="margin-top:14px"></div>
+  `;
+  document.getElementById('sc-product-chips').innerHTML = renderProductChips();
+  selectSCProduct(_scProduct || PRODUCTS[0].id);
+}
+
+function renderProductChips() {
+  return PRODUCTS.map(p => `
+    <div onclick="selectSCProduct('${p.id}')" style="flex-shrink:0;cursor:pointer;padding:6px 12px;border-radius:20px;
+      border:1px solid ${_scProduct===p.id?'var(--accent)':'var(--border)'};
+      background:${_scProduct===p.id?'rgba(59,130,246,0.18)':'var(--surface2)'};
+      color:${_scProduct===p.id?'var(--accent)':'var(--text2)'};font-size:12px;white-space:nowrap">
+      ${p.icon} ${p.name}
+    </div>`).join('');
+}
+
+function selectSCProduct(id) {
+  _scProduct = id;
+  document.getElementById('sc-product-chips').innerHTML = renderProductChips();
+  document.getElementById('sc-product-detail').innerHTML = '';
+  drawProductDiagram();
+}
+
+function drawProductDiagram() {
+  const area = document.getElementById('sc-product-diagram');
+  const p = PRODUCT_MAP[_scProduct];
+  if (!p || !area) return;
+  area.innerHTML = '';
+  const inputs = p.inputs, companies = p.assemblers;
+  const rowH = 46, PAD = 20;
+  const H = Math.max(inputs.length, companies.length) * rowH + PAD*2;
+  const leftW = 230, midW = 90, gap = 60, rightW = 210;
+  const W = leftW + gap + midW + gap + rightW;
+  const svg = d3.select(area).append('svg').attr('width', W).attr('height', H);
+  const pcx = leftW + gap + midW/2, pcy = H/2;
+
+  // Input nodes (left column) → curved link to the product node.
+  inputs.forEach((inp, i) => {
+    const m = MINERAL_MAP[inp.mineralId];
+    const stage = (m.stages||[]).find(s=>s.id===inp.stageId) || {};
+    const data = getStageData(inp.mineralId, inp.stageId);
+    const top = data.sellers[0]; const topCountry = top && COUNTRIES.find(c=>c.id===top.id);
+    const y = PAD + i*rowH;
+    const sx = leftW, sy = y + (rowH-8)/2;
+    svg.append('path').attr('d', `M${sx},${sy} C${(sx+pcx)/2},${sy} ${(sx+pcx)/2},${pcy} ${pcx-42},${pcy}`)
+      .attr('fill','none').attr('stroke','var(--accent)').attr('stroke-width',1.5).attr('stroke-opacity',0.35);
+    const g = svg.append('g').style('cursor','pointer')
+      .on('click', () => { selectSCMineral(inp.mineralId); selectSCStage(inp.stageId); setSCTab('explorer'); });
+    g.append('rect').attr('x',0).attr('y',y).attr('width',leftW).attr('height',rowH-8).attr('rx',6)
+      .attr('fill','var(--surface2)').attr('stroke','var(--border)');
+    g.append('text').attr('x',10).attr('y',y+16).attr('font-size',11).attr('fill','var(--text)').attr('font-weight',700)
+      .text(`${m.icon} ${m.name} — ${stage.label||''}`);
+    g.append('text').attr('x',10).attr('y',y+32).attr('font-size',10).attr('fill','var(--text3)')
+      .text(`${inp.role}${topCountry?' · '+topCountry.flag+' '+topCountry.name+' '+(data.real?'(live)':'(curated)'):''}`);
+    g.append('title').text('Click to open full chain in Explorer');
+  });
+
+  // Product node (center).
+  const pg = svg.append('g');
+  pg.append('circle').attr('cx',pcx).attr('cy',pcy).attr('r',40).attr('fill','var(--accent3)').attr('fill-opacity',0.25).attr('stroke','var(--accent3)').attr('stroke-width',2);
+  pg.append('text').attr('x',pcx).attr('y',pcy-4).attr('text-anchor','middle').attr('font-size',22).text(p.icon);
+  pg.append('text').attr('x',pcx).attr('y',pcy+16).attr('text-anchor','middle').attr('fill','var(--text)').attr('font-size',11).attr('font-weight',700).text(p.name);
+
+  // Assembler company nodes (right column) ← curved link from the product node.
+  const rightX = leftW + gap + midW + gap;
+  companies.forEach((co, i) => {
+    const y = PAD + i*rowH;
+    const hqC = resolveCompanyHqCountry(co.hq);
+    const tx = rightX, ty = y + (rowH-8)/2;
+    svg.append('path').attr('d', `M${pcx+42},${pcy} C${(pcx+tx)/2},${pcy} ${(pcx+tx)/2},${ty} ${tx},${ty}`)
+      .attr('fill','none').attr('stroke','var(--accent3)').attr('stroke-width',1.5).attr('stroke-opacity',0.35);
+    const g = svg.append('g').style('cursor','pointer').on('click', () => selectProductAssembler(co));
+    g.append('rect').attr('x',rightX).attr('y',y).attr('width',rightW).attr('height',rowH-8).attr('rx',6)
+      .attr('fill','var(--surface2)').attr('stroke','var(--border)');
+    g.append('text').attr('x',rightX+10).attr('y',y+16).attr('font-size',11).attr('fill','var(--text)').attr('font-weight',700).text(co.name);
+    g.append('text').attr('x',rightX+10).attr('y',y+32).attr('font-size',10).attr('fill','var(--text3)').text((hqC?hqC.flag+' ':'')+co.hq);
+  });
+}
+function selectProductAssembler(co) {
+  const box = document.getElementById('sc-product-detail');
+  const hqC = resolveCompanyHqCountry(co.hq);
+  box.innerHTML = `<div style="background:var(--surface2);border:1px solid var(--accent3);border-radius:10px;padding:10px 12px;display:inline-block">
+    <div style="font-size:12px;font-weight:700;color:var(--accent3)">🏢 ${co.name}</div>
+    <div style="font-size:11px;color:var(--text2);margin-top:2px">HQ: ${hqC?hqC.flag+' ':''}${co.hq}</div>
+  </div>`;
+}
+
 // ── Dashboard: user-pinned KPI tiles, persisted in localStorage (no backend) ──
 function loadDashboardTiles() { try { return JSON.parse(localStorage.getItem('sc_dashboard_tiles')||'[]'); } catch { return []; } }
 function saveDashboardTiles(tiles) { localStorage.setItem('sc_dashboard_tiles', JSON.stringify(tiles)); }
@@ -10746,7 +10951,8 @@ renderPanel();
       <div style="display:flex;align-items:center;gap:14px">
         <div style="font-size:15px;font-weight:700">🔗 Supply Chain Intelligence Terminal</div>
         <div style="display:flex;gap:2px;background:var(--surface2);border-radius:8px;padding:2px">
-          <button class="sc-toptab" id="sc-toptab-explorer" onclick="setSCTab('explorer')" style="border:none;background:var(--accent);color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600">Explorer</button>
+          <button class="sc-toptab" id="sc-toptab-products" onclick="setSCTab('products')" style="border:none;background:var(--accent);color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600">Products</button>
+          <button class="sc-toptab" id="sc-toptab-explorer" onclick="setSCTab('explorer')" style="border:none;background:none;color:var(--text2);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">Explorer</button>
           <button class="sc-toptab" id="sc-toptab-dashboard" onclick="setSCTab('dashboard')" style="border:none;background:none;color:var(--text2);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">Dashboard</button>
           <button class="sc-toptab" id="sc-toptab-risk" onclick="setSCTab('risk')" style="border:none;background:none;color:var(--text2);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">Risk &amp; Alerts</button>
           <button class="sc-toptab" id="sc-toptab-compare" onclick="setSCTab('compare')" style="border:none;background:none;color:var(--text2);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">Compare</button>
@@ -10774,6 +10980,7 @@ renderPanel();
           <button onclick="plotSupplyChainOnMap()" style="background:var(--accent);border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500">🗺️ Plot Entire Supply Chain on Map</button>
         </div>
       </div>
+      <div id="sc-tab-products" style="display:none"></div>
       <div id="sc-tab-dashboard" style="display:none"></div>
       <div id="sc-tab-risk" style="display:none"></div>
       <div id="sc-tab-compare" style="display:none"></div>
