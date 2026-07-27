@@ -45,9 +45,12 @@ jobs:
       - name: Fetch live conflict risk data (ACLED Conflict Index, public dashboard)
         run: node scripts/fetch-conflict-index.mjs
 
+      - name: Fetch live per-country news (Google News RSS, public feed)
+        run: node scripts/fetch-news.mjs
+
       - name: Commit snapshot if changed
         run: |
-          FILES="data/live-data.json data/supply-chain-data.json data/supply-chain-history.json data/conflict-index.json"
+          FILES="data/live-data.json data/supply-chain-data.json data/supply-chain-history.json data/conflict-index.json data/news-data.json"
           # `git diff` alone misses brand-new untracked files (e.g. the first time a
           # data file is created), so check status too.
           if git diff --quiet -- $FILES && [ -z "$(git status --porcelain -- $FILES)" ]; then

@@ -6545,10 +6545,11 @@ function renderCachedNews(countryId, countryName, containerId) {
     found:'ntag-policy'
   };
 
-  const news = (COUNTRY_PROFILES[countryId] && COUNTRY_PROFILES[countryId].news)
-             || NEWS_FALLBACK[countryId];
+  const live = NEWS_DATA?.countries?.[countryId] || [];
+  const curated = (COUNTRY_PROFILES[countryId] && COUNTRY_PROFILES[countryId].news)
+                || NEWS_FALLBACK[countryId] || [];
 
-  if (!news || !news.length) {
+  if (!live.length && !curated.length) {
     container.innerHTML = `
       <div style="color:var(--text3);font-size:11px;padding:8px 0">
         No news available for <strong style="color:var(--text2)">${countryName}</strong>.
@@ -6558,22 +6559,43 @@ function renderCachedNews(countryId, countryName, containerId) {
     return;
   }
 
-  container.innerHTML = `<div class="news-wrap">` +
-    news.map(a => {
-      const tc = tagMap[a.tag] || 'ntag-cached';
-      const tagLabel = a.tag ? a.tag.charAt(0).toUpperCase() + a.tag.slice(1) : 'News';
-      return `<div class="news-item">
-        <div class="news-header" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
-          <span class="news-tag ${tc}">${tagLabel}</span>
-          ${a.source ? `<span class="news-source" style="font-size:9px;color:var(--text3)">${a.source}</span>` : ''}
-          <span class="news-date" style="margin-left:auto">${a.date || ''}</span>
-        </div>
-        <div class="news-title">${a.url
-          ? `<a href="${a.url}" target="_blank" rel="noopener">${a.title}</a>`
-          : a.title}</div>
-        ${(a.body||a.description) ? `<div class="news-body">${a.body||a.description}</div>` : ''}
-      </div>`;
-    }).join('') + `</div>`;
+  // Real, sourced, dated headlines from Google News RSS (refreshed daily server-side
+  // — see scripts/fetch-news.mjs), shown first and clearly marked "Live" so it's
+  // never mistaken for the curated blurbs below it. Google's own relevance+recency
+  // ranking tends to surface the biggest/breaking stories first, which is what keeps
+  // this "critical" without an artificial crisis-keyword filter that would return
+  // nothing for stable countries.
+  const liveHtml = live.map(a => `<div class="news-item">
+    <div class="news-header" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+      <span class="news-tag" style="background:rgba(16,185,129,0.15);color:#10b981">🔴 Live</span>
+      ${a.source ? `<span class="news-source" style="font-size:9px;color:var(--text3)">${a.source}</span>` : ''}
+      <span class="news-date" style="margin-left:auto">${a.date || ''}</span>
+    </div>
+    <div class="news-title"><a href="${a.url}" target="_blank" rel="noopener">${a.title}</a></div>
+    <div style="font-size:9px;color:var(--accent2);margin-top:3px">📡 Google News RSS — refreshed daily</div>
+  </div>`).join('');
+
+  // These are curated analytical summaries, not pulled from a news API (there's no
+  // key for one) — every headline links out to a live Google News search for that
+  // exact topic + country (or a genuine curated `url` if one is set), so even the
+  // static context is backed by current real results rather than a dead label.
+  const curatedHtml = curated.map(a => {
+    const tc = tagMap[a.tag] || 'ntag-cached';
+    const tagLabel = a.tag ? a.tag.charAt(0).toUpperCase() + a.tag.slice(1) : 'News';
+    const liveUrl = a.url || `https://news.google.com/search?q=${encodeURIComponent(a.title + ' ' + countryName)}`;
+    return `<div class="news-item">
+      <div class="news-header" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+        <span class="news-tag ${tc}">${tagLabel}</span>
+        ${a.source ? `<span class="news-source" style="font-size:9px;color:var(--text3)">${a.source}</span>` : ''}
+        <span class="news-date" style="margin-left:auto">${a.date || ''}</span>
+      </div>
+      <div class="news-title"><a href="${liveUrl}" target="_blank" rel="noopener">${a.title}</a></div>
+      ${(a.body||a.description) ? `<div class="news-body">${a.body||a.description}</div>` : ''}
+      <div style="font-size:9px;color:var(--accent2);margin-top:3px">${a.url ? '🔗 Source article' : '🔎 Live Google News search ↗'}</div>
+    </div>`;
+  }).join('');
+
+  container.innerHTML = `<div class="news-wrap">${liveHtml}${curatedHtml}</div>`;
 }
 
 // ── Profile rendering helper ─────────────────────────────────
@@ -11571,6 +11593,19 @@ async function loadConflictIndexSnapshot() {
   } catch { /* non-fatal — risk layer falls back to the static list */ }
 }
 
+// ── News snapshot loader ──────────────────────────────────────────
+// Loads data/news-data.json — real, sourced, linked headlines per country from
+// Google News RSS (public, no key; see scripts/fetch-news.mjs), refreshed
+// daily. The "Recent News" section shows these ahead of the curated blurbs so
+// it's never showing only hand-written 2025 text.
+let NEWS_DATA = null;
+async function loadNewsSnapshot() {
+  try {
+    const r = await fetch('data/news-data.json', { cache: 'no-cache', signal: AbortSignal.timeout(6000) });
+    if (r.ok) NEWS_DATA = await r.json();
+  } catch { /* non-fatal — falls back to curated blurbs + a live search link */ }
+}
+
 // ── Merge helper: apply a value to the right field ─────────────
 function set(obj, path, val) {
   if (val === null || val === undefined || isNaN(val)) return;
@@ -11606,6 +11641,7 @@ async function loadLiveData() {
   const snapMeta = await loadSnapshot();
   await loadSupplyChainSnapshot();
   await loadConflictIndexSnapshot();
+  await loadNewsSnapshot();
   if (snapMeta) { renderPanel(); badge.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Fetching live data…'; }
 
   // ── Define all World Bank indicators to fetch ─────────────────
