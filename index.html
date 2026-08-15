@@ -11620,24 +11620,17 @@ async function wbFetch(indicator) {
   } catch { return {}; }
 }
 
-// ── WHO GHO fetch helper ───────────────────────────────────────
-// Returns { [ISO3]: value }
-async function whoFetch(indicator) {
-  try {
-    const url = `https://ghoapi.azureedge.net/api/${indicator}?$filter=Dim1 eq 'BTSX'&$orderby=TimeDimensionBegin desc`;
-    const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
-    if (!r.ok) return {};
-    const json = await r.json();
-    const out = {};
-    // Take most recent value per country
-    json.value?.forEach(d => {
-      const iso3 = d.SpatialDim;
-      if (iso3 && d.NumericValue !== null && d.NumericValue !== undefined && !out[iso3])
-        out[iso3] = +d.NumericValue;
-    });
-    return out;
-  } catch { return {}; }
-}
+// WHO's GHO API (ghoapi.azureedge.net) never sends Access-Control-Allow-Origin,
+// so a client-side browser fetch to it always fails with a CORS error — not
+// intermittently, not just for some visitors, every single time, for every
+// origin (verified directly: it fails identically from a completely different
+// test origin too). There used to be a whoFetch() helper calling it here for
+// mental-health-worker data (MH_18); removed — the exact same endpoint is
+// already fetched server-side in scripts/fetch-data.mjs (Node has no CORS
+// restriction) and lands in data/live-data.json's extended.health2
+// .mentalHealthWorkers field via loadSnapshot(), which runs before this
+// function anyway. Nothing is lost by not retrying it here, and it stops
+// every visitor's console from showing a scary (but harmless) red CORS error.
 
 // ── Eurostat fetch helper (JSON-stat 2.0) ───────────────────────
 // Returns { [geoCode]: mostRecentValue } across all EU/EEA geos in one call.
@@ -11908,15 +11901,14 @@ async function loadLiveData() {
       WB.map(([ind]) => wbFetch(ind))
     );
 
-    // IMF GDP growth (more current) + forex rates in parallel with WB
-    const [imfRaw, fxRaw] = await Promise.allSettled([
-      fetch('https://www.imf.org/external/datamapper/api/v1/NGDP_RPCH', { signal: AbortSignal.timeout(10000) }).then(r => r.json()),
+    // Forex rates in parallel with WB. IMF's DataMapper API (like WHO's GHO
+    // above) never sends Access-Control-Allow-Origin — verified it fails
+    // identically from two unrelated origins, so it's a permanent block, not
+    // an intermittent one — so it's not fetched client-side at all; the same
+    // endpoint is already pulled server-side in fetch-data.mjs and lands in
+    // extended.econ2.gdpGrowth via the snapshot, same as mentalHealthWorkers.
+    const [fxRaw] = await Promise.allSettled([
       fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(8000) }).then(r => r.json())
-    ]);
-
-    // WHO GHO — secondary load (healthcare extras not in WB)
-    const [whoMentalH] = await Promise.all([
-      whoFetch('MH_18'),  // Mental health workers per 100k
     ]);
 
     // Eurostat — harmonized EU unemployment (authoritative for EU member states)
@@ -12005,9 +11997,8 @@ async function loadLiveData() {
         if (has('_h2_tb'))    ex.health2.tbIncidence    = gv('_h2_tb');
         if (has('_h2_hiv'))   ex.health2.hivPrev        = gv('_h2_hiv');
         if (has('_h2_dtp'))   ex.health2.vaccinationDTP = gv('_h2_dtp');
-        const iso3code = ISO3[id];
-        if (iso3code && whoMentalH[iso3code] !== undefined)
-          ex.health2.mentalHealthWorkers = +whoMentalH[iso3code].toFixed(1);
+        // mentalHealthWorkers comes from the server-side snapshot only (see the
+        // note above whoFetch used to live — WHO's API blocks browser CORS).
       }
       if (ex.econ2) {
         if (has('_econ2_gdpg')) ex.econ2.gdpGrowth       = gv('_econ2_gdpg');
@@ -12024,23 +12015,8 @@ async function loadLiveData() {
       }
     });
 
-    // IMF GDP growth override (more current than WB)
-    if (imfRaw.status === 'fulfilled' && imfRaw.value?.values?.NGDP_RPCH) {
-      const imf = imfRaw.value.values.NGDP_RPCH;
-      COUNTRIES.forEach(c => {
-        const iso3 = ISO3[c.id];
-        if (!iso3 || !imf[iso3]) return;
-        // Most recent year with actual data (not forecast)
-        const entry = Object.entries(imf[iso3])
-          .filter(([y, v]) => v !== null && +y <= new Date().getFullYear())
-          .sort(([a],[b]) => +b - +a)[0];
-        if (entry) {
-          if (!EXTENDED[c.id]) EXTENDED[c.id] = {};
-          if (!EXTENDED[c.id].econ2) EXTENDED[c.id].econ2 = {};
-          EXTENDED[c.id].econ2.gdpGrowth = +parseFloat(entry[1]).toFixed(1);
-        }
-      });
-    }
+    // IMF GDP growth override — client-side fetch removed (see note above),
+    // extended.econ2.gdpGrowth comes from the server-side snapshot only.
 
     // Forex rates
     if (fxRaw.status === 'fulfilled' && fxRaw.value?.rates) {
