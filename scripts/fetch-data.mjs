@@ -110,6 +110,26 @@ async function wbIndicator(code) {
   } catch (e) { console.warn(`[WB] ${code} failed:`, e.message); return {}; }
 }
 
+// ── World Bank: full per-year series (not collapsed to most-recent) ──
+// Used for the Year selector, so switching years shows a REAL published figure
+// for whichever years the source has actually released per country — never a
+// computed/extrapolated guess. A single bulk `country=all` request per
+// indicator covers every country for the whole date range at once.
+async function wbIndicatorSeries(code, fromYear, toYear) {
+  try {
+    const url = `https://api.worldbank.org/v2/country/all/indicator/${code}?format=json&date=${fromYear}:${toYear}&per_page=20000`;
+    const [, rows] = await getJSON(url);
+    const out = {}; // iso2 -> { year: value }
+    (rows || []).forEach(r => {
+      if (r.value === null || r.value === undefined || !r.country?.id) return;
+      const iso2 = r.country.id.toUpperCase();
+      if (!out[iso2]) out[iso2] = {};
+      out[iso2][r.date] = +r.value;
+    });
+    return out;
+  } catch (e) { console.warn(`[WB series] ${code} failed:`, e.message); return {}; }
+}
+
 async function imfIndicator(code) {
   try {
     const j = await getJSON(`https://www.imf.org/external/datamapper/api/v1/${code}`);
@@ -213,6 +233,25 @@ async function main() {
   const wbResults = {};
   wbEntries.forEach(([key], i) => { wbResults[key] = wbValues[i]; });
 
+  // ── Real per-year historical series for the Year selector ──
+  // Only indicators World Bank actually exposes as a queryable annual time
+  // series. HDI (UNDP) and the innovation index (WIPO GII) are annual-report
+  // publications with no API at all, so they're deliberately NOT here — the
+  // client leaves those un-scaled by year rather than fabricate a trend for
+  // a source that doesn't expose one.
+  const YEARLY_CODES = {
+    gdp: 'NY.GDP.PCAP.CD', gdpTotal: 'NY.GDP.MKTP.CD',
+    lifeExp: 'SP.DYN.LE00.IN', internet: 'IT.NET.USER.ZS',
+    inflation: 'FP.CPI.TOTL.ZG', population: 'SP.POP.TOTL',
+  };
+  const EARLIEST_YEAR = 2015; // World Bank reliably has these back to at least here for most countries
+  const thisYear = new Date().getFullYear();
+  console.log(`Fetching real per-year series (${EARLIEST_YEAR}–${thisYear}) for the Year selector...`);
+  const yearlyEntries = Object.entries(YEARLY_CODES);
+  const yearlySeries = await runPool(yearlyEntries, 4, ([, code]) => wbIndicatorSeries(code, EARLIEST_YEAR, thisYear));
+  const yearlyByKey = {};
+  yearlyEntries.forEach(([key], i) => { yearlyByKey[key] = yearlySeries[i]; });
+
   console.log('Fetching IMF, WHO, Eurostat, OECD, forex...');
   const [imfGrowth, whoMental, eurostatUnemp, oecdGerd, fx] = await Promise.all([
     imfIndicator('NGDP_RPCH'),
@@ -312,6 +351,18 @@ async function main() {
     countries[id] = entry;
   }
 
+  // Re-key the yearly series by our internal country id (dropping countries/
+  // regions with no real data at all for that indicator, e.g. WB aggregate
+  // rows like "Africa Western and Central" that aren't in our roster).
+  const yearly = {};
+  for (const key of Object.keys(YEARLY_CODES)) {
+    yearly[key] = {};
+    for (const { id, iso2 } of roster) {
+      const series = yearlyByKey[key][iso2];
+      if (series && Object.keys(series).length) yearly[key][id] = series;
+    }
+  }
+
   const out = {
     meta: {
       generatedAt: new Date().toISOString(),
@@ -319,6 +370,7 @@ async function main() {
       countryCount: Object.keys(countries).length,
     },
     countries,
+    yearly,
   };
 
   mkdirSync(join(ROOT, 'data'), { recursive: true });
